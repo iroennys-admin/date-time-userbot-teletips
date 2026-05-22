@@ -1,7 +1,27 @@
 #!/usr/bin/env python3
 """
-DATE TIME USERBOT - Versión Mejorada para Render
-Flask como servidor principal (bind al puerto), Pyrogram en hilo secundario.
+DATE TIME USERBOT v2.0 - Versión Completa con 18 mejoras
+Flask como servidor principal, Pyrogram en mismo event loop.
+
+Mejoras incluidas:
+1. Tema día/noche automático
+2. Barra de progreso del día
+3. Estilos de imagen (neon, retro, minimal, gradient, auto)
+4. Emoji dinámico por hora
+5. Clima real en imagen
+6. Frases por categoría
+7. Bio por horario
+8. Contador en bio
+9. Bio personalizada con prefijo
+10. Comandos por Telegram
+11. Modo AFK
+12. Notificaciones de errores
+13. Web Dashboard
+14. Countdown
+15. Múltiples zonas horarias
+16. Monitoreo proactivo
+17. Keep-alive para Render
+18. Reconexión automática mejorada
 """
 
 import os
@@ -15,21 +35,23 @@ import threading
 import urllib.request
 from pathlib import Path
 
-# ─── IMPORTAR PYROGRAM ANTES DE FLASK (en hilo principal) ──────────
-# Pyrogram necesita un event loop al importarse, lo creamos aquí
+# ─── Event loop ANTES de importar Pyrogram ─────────────────────────
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-from pyrogram import Client
+from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, AuthKeyUnregistered, SessionRevoked
 from PIL import Image, ImageDraw, ImageFont
 from flask import Flask, jsonify
 import pytz
 
-from lists_teletips.emojis_teletips import emojis_teletips
-from lists_teletips.quotes_teletips import quotes_teletips
+from config import *
+from image_generator import generate_profile_image
+from weather import get_weather
+from lists_teletips.emojis_teletips import get_emoji, general_emojis
+from lists_teletips.quotes_teletips import get_quote, quotes_by_category
 
-# ─── Configuración de Logging ────────────────────────────────────
+# ─── Logging ──────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -37,89 +59,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger("DateTimeUserbot")
 
-# ─── Variables de Configuración ────────────────────────────────────
-API_ID = int(os.environ.get("API_ID", "14681595"))
-API_HASH = os.environ.get("API_HASH", "a86730aab5c59953c424abb4396d32d5")
-SESSION_STRING = os.environ.get("SESSION_STRING", "AQDgBfsAA1wQ2Lka011s9cskUPNHS4UIPGp8-C6KmTjZUEqoSrqL07TV_Wn4sihKBp4A5qag_e61zgJlfPdQrSfnqUhwKYVGn3rNsTCmMltVlA39AhFLWzyS_fToU3HwxYEn3VsutChqKCFArHZq08Fw_mZ__NETqeopo6zlnOKa_M-hF8xCiNeGukQ3zK076oRde9reAvF8IgRUEIUjp3OllhKU-6BFmC6WlOouJjobpBCzMc96m7QFV3p6jeauxTrhA_6fOGesFwuW65cEnXLBfI6SYtt_OgDC6iptax5UI-DgL3A12xEpje-X_EhPZ6L2ZmDF3NSy2wveIno9x90tNI-wFAAAAAHbE6seAA")
-TIME_ZONE = os.environ.get("TIME_ZONE", "America/Havana")
-UPDATE_INTERVAL = int(os.environ.get("UPDATE_INTERVAL", "60"))
-MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "5"))
-FONT_PATH = os.environ.get("FONT_PATH", "ds-digit.ttf")
-BASE_IMAGE = os.environ.get("BASE_IMAGE", "image.jpg")
-
-# ─── Estado global del bot ─────────────────────────────────────────
-bot_status = {
+# ─── Estado global del bot (modificable vía comandos) ──────────────
+bot_state = {
     "started": False,
     "connected": False,
     "last_update": None,
     "error": None,
     "profile_name": None,
     "update_count": 0,
+    # Configuración dinámica
+    "image_style": IMAGE_STYLE,
+    "bio_category": BIO_CATEGORY,
+    "schedule_mode": BIO_SCHEDULE_MODE,
+    "show_weather": WEATHER_SHOW,
+    "show_progress": SHOW_DAY_PROGRESS,
+    "afk_enabled": AFK_ENABLED,
+    "afk_message": AFK_MESSAGE,
+    "afk_replied": set(),
+    "countdown_date": COUNTDOWN_DATE,
+    "countdown_label": COUNTDOWN_LABEL,
+    "weather_info": None,
 }
-
-# ─── Generador de Imágenes ──────────────────────────────────────
-def generate_profile_image(time_str: str, date_str: str) -> str:
-    output_path = "profile_output.jpg"
-    try:
-        if Path(BASE_IMAGE).exists():
-            img = Image.open(BASE_IMAGE).resize((512, 512), Image.Resampling.LANCZOS)
-        else:
-            img = create_gradient_background(512, 512)
-
-        draw = ImageDraw.Draw(img)
-
-        # Cargar fuente
-        try:
-            if Path(FONT_PATH).exists():
-                font_large = ImageFont.truetype(FONT_PATH, 72)
-                font_small = ImageFont.truetype(FONT_PATH, 36)
-            else:
-                font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 72)
-                font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 36)
-        except Exception:
-            font_large = ImageFont.load_default()
-            font_small = ImageFont.load_default()
-
-        # Overlay semitransparente
-        overlay = Image.new("RGBA", (512, 512), (0, 0, 0, 100))
-        img_rgba = img.convert("RGBA")
-        img_rgba = Image.alpha_composite(img_rgba, overlay)
-        img = img_rgba.convert("RGB")
-        draw = ImageDraw.Draw(img)
-
-        img_width, img_height = img.size
-
-        # Hora centrada
-        time_bbox = draw.textbbox((0, 0), time_str, font=font_large)
-        time_w = time_bbox[2] - time_bbox[0]
-        time_x = (img_width - time_w) // 2
-        time_y = img_height // 2 - 60
-        draw.text((time_x + 2, time_y + 2), time_str, (0, 0, 0), font=font_large)
-        draw.text((time_x, time_y), time_str, (0, 255, 255), font=font_large)
-
-        # Fecha centrada
-        date_bbox = draw.textbbox((0, 0), date_str, font=font_small)
-        date_w = date_bbox[2] - date_bbox[0]
-        date_x = (img_width - date_w) // 2
-        date_y = time_y + 90
-        draw.text((date_x + 2, date_y + 2), date_str, (0, 0, 0), font=font_small)
-        draw.text((date_x, date_y), date_str, (255, 255, 255), font=font_small)
-
-        img.save(output_path, "JPEG", quality=95)
-        return output_path
-    except Exception as e:
-        logger.error(f"Error generando imagen: {e}")
-        return None
-
-def create_gradient_background(width: int, height: int):
-    img = Image.new("RGB", (width, height))
-    draw = ImageDraw.Draw(img)
-    for y in range(height):
-        r = int(20 + (80 - 20) * y / height)
-        g = int(10 + (20 - 10) * y / height)
-        b = int(60 + (120 - 60) * y / height)
-        draw.line([(0, y), (width, y)], fill=(r, g, b))
-    return img
 
 # ─── Cliente Pyrogram ─────────────────────────────────────────────
 userbot = Client(
@@ -129,68 +89,131 @@ userbot = Client(
     session_string=SESSION_STRING,
 )
 
-# ─── Flask App (servidor principal) ────────────────────────────────
+# ─── Flask App ─────────────────────────────────────────────────────
 app = Flask(__name__)
 
 @app.route("/")
 def health_check():
     return jsonify({
         "status": "alive",
-        "bot": "DateTimeUserbot",
-        "connected": bot_status["connected"],
+        "bot": "DateTimeUserbot v2.0",
+        "connected": bot_state["connected"],
         "timezone": TIME_ZONE,
-        "last_update": bot_status["last_update"],
-        "update_count": bot_status["update_count"],
+        "last_update": bot_state["last_update"],
+        "update_count": bot_state["update_count"],
+        "style": bot_state["image_style"],
         "timestamp": datetime.datetime.now(pytz.timezone(TIME_ZONE)).isoformat(),
     })
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "healthy", "bot_connected": bot_status["connected"]})
+    return jsonify({"status": "healthy", "bot_connected": bot_state["connected"]})
 
 @app.route("/debug")
 def debug_info():
     return jsonify({
         "status": "alive",
-        "bot_started": bot_status["started"],
-        "bot_connected": bot_status["connected"],
-        "profile_name": bot_status["profile_name"],
-        "last_update": bot_status["last_update"],
-        "update_count": bot_status["update_count"],
-        "error": bot_status["error"],
-        "api_id": API_ID,
-        "session_set": bool(SESSION_STRING),
-        "timezone": TIME_ZONE,
+        "bot_started": bot_state["started"],
+        "bot_connected": bot_state["connected"],
+        "profile_name": bot_state["profile_name"],
+        "last_update": bot_state["last_update"],
+        "update_count": bot_state["update_count"],
+        "error": bot_state["error"],
+        "image_style": bot_state["image_style"],
+        "bio_category": bot_state["bio_category"],
+        "show_weather": bot_state["show_weather"],
+        "show_progress": bot_state["show_progress"],
+        "afk_enabled": bot_state["afk_enabled"],
+        "countdown": bot_state["countdown_date"],
         "python_version": sys.version,
     })
 
-# ─── Bucle del Bot ─────────────────────────────────────────────────
+# ─── Registrar Dashboard ──────────────────────────────────────────
+from dashboard import register_dashboard
+register_dashboard(app, bot_state, config=__import__('config'))
+
+# ─── Registrar Comandos ───────────────────────────────────────────
+from commands import register_commands
+register_commands(userbot, bot_state)
+
+# ─── Notificaciones ───────────────────────────────────────────────
+async def send_notification(message: str):
+    """Envía una notificación al chat configurado."""
+    if not NOTIFY_CHAT_ID:
+        return
+    try:
+        await userbot.send_message(NOTIFY_CHAT_ID, f"🤖 {message}")
+    except Exception as e:
+        logger.debug(f"No se pudo enviar notificación: {e}")
+
+# ─── Calcular Countdown ───────────────────────────────────────────
+def get_countdown_days() -> tuple:
+    """Retorna (días_restantes, label) o (None, None)."""
+    cd_date = bot_state.get("countdown_date", "")
+    if not cd_date:
+        return None, None
+    try:
+        target = datetime.datetime.strptime(cd_date, "%Y-%m-%d").date()
+        today = datetime.date.today()
+        days = (target - today).days
+        return days, bot_state.get("countdown_label", "")
+    except Exception:
+        return None, None
+
+# ─── Zonas horarias adicionales ───────────────────────────────────
+def get_extra_tz_times() -> list:
+    """Obtiene la hora en zonas horarias adicionales."""
+    extra_tz = EXTRA_TIMEZONES
+    if not extra_tz:
+        return []
+    
+    results = []
+    for tz_name in extra_tz.split(","):
+        tz_name = tz_name.strip()
+        if not tz_name:
+            continue
+        try:
+            tz = pytz.timezone(tz_name)
+            now_tz = datetime.datetime.now(tz)
+            # Nombre corto de la zona
+            short_name = tz_name.split("/")[-1].replace("_", " ")
+            results.append((short_name, now_tz.strftime("%I:%M %p")))
+        except Exception:
+            pass
+    return results
+
+# ─── Bucle Principal del Bot ──────────────────────────────────────
 async def main_bot():
     """Bucle principal que actualiza el perfil periódicamente."""
     retry_count = 0
     base_delay = 5
+    last_success_time = 0
 
-    bot_status["started"] = True
-    logger.info("Iniciando cliente Pyrogram...")
+    bot_status_copy = bot_state  # Referencia al estado global
+    bot_status_copy["started"] = True
+    logger.info("Iniciando DateTime Userbot v2.0...")
 
+    # Conectar
     try:
         await userbot.start()
         me = await userbot.get_me()
-        bot_status["connected"] = True
-        bot_status["profile_name"] = me.first_name
+        bot_status_copy["connected"] = True
+        bot_status_copy["profile_name"] = me.first_name
         logger.info(f"Conectado como: {me.first_name} (ID: {me.id})")
+        await send_notification(f"Bot iniciado ✅\nConectado como: {me.first_name}")
     except (AuthKeyUnregistered, SessionRevoked) as e:
-        logger.critical(f"Sesion invalida o revocada: {e}")
-        bot_status["error"] = str(e)
+        logger.critical(f"Sesión inválida: {e}")
+        bot_status_copy["error"] = str(e)
+        await send_notification(f"Bot ERROR ❌\nSesión inválida: {e}")
         return
     except Exception as e:
         logger.error(f"Error al iniciar: {e}")
-        bot_status["error"] = str(e)
-        # No retornar, intentar reconectar en el bucle
+        bot_status_copy["error"] = str(e)
 
     while True:
         try:
-            if not bot_status["connected"]:
+            # ── Reconexión si está desconectado ──
+            if not bot_status_copy["connected"]:
                 logger.info("Intentando reconectar...")
                 try:
                     await userbot.stop()
@@ -198,23 +221,67 @@ async def main_bot():
                     pass
                 await userbot.start()
                 me = await userbot.get_me()
-                bot_status["connected"] = True
-                bot_status["profile_name"] = me.first_name
+                bot_status_copy["connected"] = True
+                bot_status_copy["profile_name"] = me.first_name
                 retry_count = 0
                 logger.info(f"Reconectado como: {me.first_name}")
+                await send_notification("Bot reconectado ✅")
 
+            # ── Monitoreo proactivo ──
+            import time
+            current_time = time.time()
+            if last_success_time > 0 and (current_time - last_success_time) > MONITOR_TIMEOUT:
+                logger.warning(f"No se actualizó en {MONITOR_TIMEOUT}s. Forzando reconexión...")
+                bot_status_copy["connected"] = False
+                continue
+
+            # ── Obtener hora ──
             tz = pytz.timezone(TIME_ZONE)
             now = datetime.datetime.now(tz)
+            hour = now.hour
 
             time_str = now.strftime("%I:%M %p")
             date_str = now.strftime("%b %d, %Y")
             day_name = now.strftime("%A")
+            day_of_year = now.timetuple().tm_yday
 
-            emoji = random.choice(emojis_teletips)
-            quote = random.choice(quotes_teletips)
+            # ── Emoji ──
+            emoji = get_emoji(hour, dynamic=DYNAMIC_HOUR_EMOJI)
 
-            # Generar y actualizar foto de perfil
-            image_path = generate_profile_image(time_str, date_str)
+            # ── Frase ──
+            quote = get_quote(
+                category=bot_status_copy.get("bio_category", "random"),
+                hour=hour,
+                schedule_mode=bot_status_copy.get("schedule_mode", True),
+            )
+
+            # ── Clima ──
+            weather_data = None
+            if bot_status_copy.get("show_weather", True):
+                weather_data = get_weather(WEATHER_CITY)
+                bot_status_copy["weather_info"] = f"{weather_data['emoji']} {weather_data['temp']}"
+
+            # ── Countdown ──
+            countdown_days, countdown_label = get_countdown_days()
+
+            # ── Zonas horarias extra ──
+            extra_tz = get_extra_tz_times()
+
+            # ── Generar imagen ──
+            image_path = generate_profile_image(
+                time_str=time_str,
+                date_str=date_str,
+                hour=hour,
+                style=bot_status_copy.get("image_style", "auto"),
+                base_image=BASE_IMAGE,
+                font_path=FONT_PATH,
+                weather=weather_data,
+                show_progress=bot_status_copy.get("show_progress", True),
+                countdown_days=countdown_days,
+                countdown_label=countdown_label,
+                extra_tz_times=extra_tz,
+            )
+
             if image_path:
                 try:
                     await userbot.set_profile_photo(photo=image_path)
@@ -241,14 +308,30 @@ async def main_bot():
                 except Exception:
                     pass
 
-            # Actualizar apellido y bio
+            # ── Actualizar apellido y bio ──
             last_name = f"| {time_str} | {date_str}"
-            bio = f"{emoji} {quote}"
+            
+            # Construir bio con todas las opciones
+            bio_parts = []
+            
+            # Prefijo personalizado
+            if BIO_CUSTOM_PREFIX:
+                bio_parts.append(BIO_CUSTOM_PREFIX)
+            
+            # Emoji + frase
+            bio_parts.append(f"{emoji} {quote}")
+            
+            # Contador
+            if BIO_SHOW_COUNTER:
+                bio_parts.append(f"Día {day_of_year}")
+            
+            bio = " | ".join(bio_parts)
 
             try:
                 await userbot.update_profile(last_name=last_name, bio=bio)
-                bot_status["last_update"] = now.isoformat()
-                bot_status["update_count"] += 1
+                bot_status_copy["last_update"] = now.isoformat()
+                bot_status_copy["update_count"] += 1
+                last_success_time = time.time()
                 logger.info(f"Perfil actualizado: {day_name} {time_str}")
             except FloodWait as e:
                 logger.warning(f"FloodWait en perfil: {e.value}s")
@@ -263,16 +346,17 @@ async def main_bot():
             await asyncio.sleep(e.value)
 
         except (AuthKeyUnregistered, SessionRevoked) as e:
-            logger.critical(f"Sesion invalida: {e}")
-            bot_status["connected"] = False
-            bot_status["error"] = str(e)
+            logger.critical(f"Sesión inválida: {e}")
+            bot_state["connected"] = False
+            bot_state["error"] = str(e)
+            await send_notification(f"Bot DETENIDO ❌\nSesión revocada: {e}")
             break
 
         except ConnectionError as e:
             retry_count += 1
             delay = min(base_delay * (2 ** retry_count), 300)
-            logger.error(f"Error de conexion (intento {retry_count}): {e}")
-            bot_status["connected"] = False
+            logger.error(f"Error de conexión (intento {retry_count}): {e}")
+            bot_state["connected"] = False
             await asyncio.sleep(delay)
 
         except Exception as e:
@@ -282,63 +366,56 @@ async def main_bot():
             logger.debug(traceback.format_exc())
 
             if retry_count >= MAX_RETRIES:
-                logger.critical("Maximo de reintentos alcanzado.")
+                logger.critical("Máximo reintentos. Reiniciando cliente...")
+                await send_notification(f"Bot reiniciándose ⚠️\nError: {e}")
                 try:
                     await userbot.stop()
                 except Exception:
                     pass
                 retry_count = 0
-                bot_status["connected"] = False
+                bot_state["connected"] = False
 
             await asyncio.sleep(delay)
 
-# ─── Keep-Alive: evita que Render duerma el servicio ───────────────
+
+# ─── Keep-Alive ────────────────────────────────────────────────────
 def keep_alive():
-    """Auto-ping cada 14 minutos para que Render no duerma el servicio free."""
-    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
-    if not RENDER_URL:
-        # Intentar construir la URL desde el hostname de Render
-        RENDER_URL = os.environ.get("RENDER_SERVICE_URL", "")
+    """Auto-ping cada 14 minutos para Render free."""
+    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if not render_url:
+        render_url = os.environ.get("RENDER_SERVICE_URL", "")
     
-    if RENDER_URL:
+    if render_url:
         def ping():
             while True:
                 try:
-                    urllib.request.urlopen(f"{RENDER_URL}/health", timeout=10)
-                    logger.debug(f"Keep-alive ping OK: {RENDER_URL}/health")
-                except Exception as e:
-                    logger.debug(f"Keep-alive ping fallo: {e}")
-                # Cada 14 minutos (Render duerme a los 15)
+                    urllib.request.urlopen(f"{render_url}/health", timeout=10)
+                except Exception:
+                    pass
                 threading.Event().wait(14 * 60)
         
-        ping_thread = threading.Thread(target=ping, daemon=True)
-        ping_thread.start()
-        logger.info(f"Keep-alive activado: ping cada 14 min a {RENDER_URL}/health")
+        t = threading.Thread(target=ping, daemon=True)
+        t.start()
+        logger.info(f"Keep-alive activado: {render_url}/health")
     else:
-        logger.warning("Keep-alive desactivado: no se encontro RENDER_EXTERNAL_URL")
+        logger.warning("Keep-alive: RENDER_EXTERNAL_URL no encontrada")
+
 
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-
-    # Ejecutar el bot y Flask en el mismo event loop
     async def run_all():
-        # Ejecutar el bot
         bot_task = asyncio.ensure_future(main_bot())
-
-        # Flask en hilo separado
+        
         flask_thread = threading.Thread(
-            target=lambda: app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False),
+            target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False),
             daemon=True
         )
         flask_thread.start()
-        logger.info(f"Flask health check en puerto {port}")
-
-        # Activar keep-alive
+        logger.info(f"Flask en puerto {PORT}")
+        
         keep_alive()
-
-        # Mantener el bot corriendo
+        
         await bot_task
 
-    logger.info("Iniciando DateTime Userbot...")
+    logger.info("🚀 DateTime Userbot v2.0 iniciando...")
     loop.run_until_complete(run_all())
