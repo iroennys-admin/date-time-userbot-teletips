@@ -1,1 +1,1 @@
-worker: python3 date_time_userbot_teletips.py
+web: python3 date_time_userbot.py

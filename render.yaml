@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: datetime-userbot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 date_time_userbot.py
+    plan: free
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: SESSION_STRING
+        sync: false
+      - key: TIME_ZONE
+        value: America/Havana
+      - key: UPDATE_INTERVAL
+        value: "60"
+      - key: MAX_RETRIES
+        value: "5"

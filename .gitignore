@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.session
+*.session-journal
+profile_output.jpg
+session_string.txt
+code.txt
+code_sent.txt
+session_log.txt
+.env
