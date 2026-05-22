@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DATE TIME USERBOT v2.0 - Version Completa con 18 mejoras
+DATE TIME USERBOT v2.0 - Version Completa con todas las mejoras
 Flask arranca PRIMERO, Pyrogram se inicializa despues.
 """
 
@@ -11,6 +11,7 @@ import asyncio
 import datetime
 import traceback
 import threading
+import time as time_mod
 import urllib.request
 from pathlib import Path
 
@@ -26,30 +27,40 @@ logger = logging.getLogger("DateTimeUserbot")
 bot_state = {
     "started": False,
     "connected": False,
+    "bot_active": True,  # on/off del bot
     "last_update": None,
     "error": None,
     "startup_log": [],
     "profile_name": None,
     "update_count": 0,
+    "start_time": time_mod.time(),
     "image_style": "auto",
+    "bg_theme": "",
     "bio_category": "random",
     "schedule_mode": True,
     "show_weather": True,
     "show_progress": True,
     "afk_enabled": True,
     "afk_message": "No estoy disponible ahora.",
-    "afk_replied": [],
+    "afk_since": "",
+    "afk_replied": set(),
     "countdown_date": "",
     "countdown_label": "",
     "weather_info": None,
     "python_version": sys.version,
+    "mood": "",
+    "mood_emoji": "",
+    "mood_bio": "",
+    "custom_bio": "",
+    "custom_last_name": "",
+    "update_interval": 60,
+    "notes": {},
+    "restart_requested": False,
 }
 
 def log_startup(msg):
-    """Agrega mensaje al log de inicio visible via /debug."""
     logger.info(msg)
     bot_state["startup_log"].append(f"{datetime.datetime.now().strftime('%H:%M:%S')} | {msg}")
-    # Mantener solo los ultimos 30 mensajes
     bot_state["startup_log"] = bot_state["startup_log"][-30:]
 
 # ─── Flask App (arranca PRIMERO) ─────────────────────────────────
@@ -62,14 +73,17 @@ def health_check():
         "status": "alive",
         "bot": "DateTimeUserbot v2.0",
         "connected": bot_state["connected"],
+        "bot_active": bot_state["bot_active"],
         "last_update": bot_state["last_update"],
         "update_count": bot_state["update_count"],
         "style": bot_state["image_style"],
+        "theme": bot_state.get("bg_theme", "auto"),
+        "mood": bot_state.get("mood", "none"),
     })
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "healthy", "bot_connected": bot_state["connected"]})
+    return jsonify({"status": "healthy", "bot_connected": bot_state["connected"], "bot_active": bot_state["bot_active"]})
 
 @app.route("/debug")
 def debug_info():
@@ -77,16 +91,21 @@ def debug_info():
         "status": "alive",
         "bot_started": bot_state["started"],
         "bot_connected": bot_state["connected"],
+        "bot_active": bot_state["bot_active"],
         "profile_name": bot_state["profile_name"],
         "last_update": bot_state["last_update"],
         "update_count": bot_state["update_count"],
         "error": bot_state["error"],
         "image_style": bot_state["image_style"],
+        "bg_theme": bot_state.get("bg_theme", ""),
         "bio_category": bot_state["bio_category"],
+        "mood": bot_state.get("mood", ""),
         "show_weather": bot_state["show_weather"],
         "show_progress": bot_state["show_progress"],
         "afk_enabled": bot_state["afk_enabled"],
         "countdown": bot_state["countdown_date"],
+        "update_interval": bot_state.get("update_interval", 60),
+        "notes_count": len(bot_state.get("notes", {})),
         "python_version": sys.version,
         "startup_log": bot_state["startup_log"],
     })
@@ -104,8 +123,6 @@ try:
         SHOW_DAY_PROGRESS, DYNAMIC_HOUR_EMOJI, MONITOR_TIMEOUT,
     )
     log_startup(f"Config cargada - TZ: {TIME_ZONE}, PORT: {PORT}")
-    
-    # Actualizar bot_state con config
     bot_state["image_style"] = IMAGE_STYLE
     bot_state["bio_category"] = BIO_CATEGORY
     bot_state["schedule_mode"] = BIO_SCHEDULE_MODE
@@ -115,7 +132,7 @@ try:
     bot_state["afk_message"] = AFK_MESSAGE
     bot_state["countdown_date"] = COUNTDOWN_DATE
     bot_state["countdown_label"] = COUNTDOWN_LABEL
-    
+    bot_state["update_interval"] = UPDATE_INTERVAL
 except Exception as e:
     log_startup(f"ERROR cargando config: {e}")
     API_ID = 14681595
@@ -129,7 +146,6 @@ except Exception as e:
     FONT_PATH = "ds-digit.ttf"
     BASE_IMAGE = "image.jpg"
     IMAGE_STYLE = "auto"
-    BIO_CATEGORY = "random"
     BIO_CUSTOM_PREFIX = ""
     BIO_SHOW_COUNTER = True
     BIO_SCHEDULE_MODE = True
@@ -158,7 +174,6 @@ try:
     log_startup("Pyrogram importado OK")
 except Exception as e:
     log_startup(f"ERROR importando Pyrogram: {e}")
-    bot_state["error"] = f"Pyrogram import: {e}"
 
 pil_ok = False
 try:
@@ -219,7 +234,6 @@ if pyrogram_ok:
         log_startup("Pyrogram Client creado")
     except Exception as e:
         log_startup(f"ERROR creando Pyrogram Client: {e}")
-        bot_state["error"] = f"Pyrogram Client: {e}"
 
 # ─── Registrar Dashboard ──────────────────────────────────────────
 try:
@@ -279,11 +293,19 @@ def get_extra_tz_times() -> list:
             pass
     return results
 
+# ─── Calcular uptime ──────────────────────────────────────────────
+def get_uptime_str() -> str:
+    uptime_s = int(time_mod.time() - bot_state.get("start_time", time_mod.time()))
+    hours = uptime_s // 3600
+    minutes = (uptime_s % 3600) // 60
+    if hours > 0:
+        return f"{hours}h{minutes}m"
+    return f"{minutes}m"
+
 # ─── Bucle Principal del Bot ──────────────────────────────────────
 async def main_bot():
     if not userbot:
         log_startup("No se puede iniciar bot: Pyrogram no disponible")
-        bot_state["error"] = "Pyrogram no disponible"
         return
 
     retry_count = 0
@@ -291,7 +313,7 @@ async def main_bot():
     last_success_time = 0
 
     bot_state["started"] = True
-    log_startup("Iniciando bucle principal del bot...")
+    log_startup("Iniciando bucle principal...")
 
     # Conectar
     try:
@@ -299,8 +321,8 @@ async def main_bot():
         me = await userbot.get_me()
         bot_state["connected"] = True
         bot_state["profile_name"] = me.first_name
+        bot_state["start_time"] = time_mod.time()
         log_startup(f"Conectado como: {me.first_name} (ID: {me.id})")
-        await send_notification(f"Bot iniciado\nConectado como: {me.first_name}")
     except (AuthKeyUnregistered, SessionRevoked) as e:
         log_startup(f"Sesion invalida: {e}")
         bot_state["error"] = str(e)
@@ -311,12 +333,29 @@ async def main_bot():
 
     while True:
         try:
+            # Verificar reinicio solicitado
+            if bot_state.get("restart_requested", False):
+                log_startup("Reinicio solicitado via comando...")
+                bot_state["restart_requested"] = False
+                try:
+                    await userbot.stop()
+                except:
+                    pass
+                bot_state["connected"] = False
+                await asyncio.sleep(3)
+                await userbot.start()
+                me = await userbot.get_me()
+                bot_state["connected"] = True
+                bot_state["profile_name"] = me.first_name
+                log_startup(f"Reiniciado como: {me.first_name}")
+                continue
+
             # Reconexion si esta desconectado
             if not bot_state["connected"]:
                 log_startup("Intentando reconectar...")
                 try:
                     await userbot.stop()
-                except Exception:
+                except:
                     pass
                 await userbot.start()
                 me = await userbot.get_me()
@@ -324,17 +363,20 @@ async def main_bot():
                 bot_state["profile_name"] = me.first_name
                 retry_count = 0
                 log_startup(f"Reconectado como: {me.first_name}")
-                await send_notification("Bot reconectado")
 
             # Monitoreo proactivo
-            import time
-            current_time = time.time()
+            current_time = time_mod.time()
             if last_success_time > 0 and (current_time - last_success_time) > MONITOR_TIMEOUT:
                 log_startup(f"No se actualizo en {MONITOR_TIMEOUT}s. Forzando reconexion...")
                 bot_state["connected"] = False
                 continue
 
-            # Obtener hora
+            # Si el bot esta PAUSADO (.off), solo dormir
+            if not bot_state.get("bot_active", True):
+                await asyncio.sleep(10)
+                continue
+
+            # ── Obtener hora ──
             tz = pytz.timezone(TIME_ZONE)
             now = datetime.datetime.now(tz)
             hour = now.hour
@@ -344,29 +386,32 @@ async def main_bot():
             day_name = now.strftime("%A")
             day_of_year = now.timetuple().tm_yday
 
-            # Emoji
+            # ── Emoji ──
             emoji = get_emoji(hour, dynamic=DYNAMIC_HOUR_EMOJI) if emojis_ok else "✨"
 
-            # Frase
+            # ── Frase ──
             quote = get_quote(
                 category=bot_state.get("bio_category", "random"),
                 hour=hour,
                 schedule_mode=bot_state.get("schedule_mode", True),
             ) if quotes_ok else "Live your best life"
 
-            # Clima
+            # ── Clima ──
             weather_data = None
             if bot_state.get("show_weather", True) and weather_ok:
                 weather_data = get_weather(WEATHER_CITY)
                 bot_state["weather_info"] = f"{weather_data['emoji']} {weather_data['temp']}"
 
-            # Countdown
+            # ── Countdown ──
             countdown_days, countdown_label = get_countdown_days()
 
-            # Zonas horarias extra
+            # ── Zonas horarias extra ──
             extra_tz = get_extra_tz_times()
 
-            # Generar imagen
+            # ── Uptime ──
+            uptime_str = get_uptime_str()
+
+            # ── Generar imagen ──
             image_path = None
             if image_gen_ok:
                 image_path = generate_profile_image(
@@ -374,6 +419,7 @@ async def main_bot():
                     date_str=date_str,
                     hour=hour,
                     style=bot_state.get("image_style", "auto"),
+                    bg_theme=bot_state.get("bg_theme", ""),
                     base_image=BASE_IMAGE,
                     font_path=FONT_PATH,
                     weather=weather_data,
@@ -381,6 +427,8 @@ async def main_bot():
                     countdown_days=countdown_days,
                     countdown_label=countdown_label,
                     extra_tz_times=extra_tz,
+                    mood_emoji=bot_state.get("mood_emoji", ""),
+                    uptime_str=uptime_str,
                 )
 
             if image_path:
@@ -409,22 +457,37 @@ async def main_bot():
                 except Exception:
                     pass
 
-            # Actualizar apellido y bio
-            last_name = f"| {time_str} | {date_str}"
+            # ── Actualizar apellido ──
+            custom_ln = bot_state.get("custom_last_name", "")
+            if custom_ln:
+                last_name = custom_ln
+            else:
+                last_name = f"| {time_str} | {date_str}"
             
-            bio_parts = []
-            if BIO_CUSTOM_PREFIX:
-                bio_parts.append(BIO_CUSTOM_PREFIX)
-            bio_parts.append(f"{emoji} {quote}")
-            if BIO_SHOW_COUNTER:
-                bio_parts.append(f"Dia {day_of_year}")
-            bio = " | ".join(bio_parts)
+            # ── Actualizar bio ──
+            custom_bio = bot_state.get("custom_bio", "")
+            if custom_bio:
+                bio = custom_bio
+            else:
+                bio_parts = []
+                # Mood bio override
+                mood_bio = bot_state.get("mood_bio", "")
+                if mood_bio:
+                    bio_parts.append(mood_bio)
+                else:
+                    if BIO_CUSTOM_PREFIX:
+                        bio_parts.append(BIO_CUSTOM_PREFIX)
+                    bio_parts.append(f"{emoji} {quote}")
+                
+                if BIO_SHOW_COUNTER:
+                    bio_parts.append(f"Dia {day_of_year}")
+                bio = " | ".join(bio_parts)
 
             try:
                 await userbot.update_profile(last_name=last_name, bio=bio)
                 bot_state["last_update"] = now.isoformat()
                 bot_state["update_count"] += 1
-                last_success_time = time.time()
+                last_success_time = time_mod.time()
                 logger.info(f"Perfil actualizado: {day_name} {time_str}")
             except FloodWait as e:
                 logger.warning(f"FloodWait en perfil: {e.value}s")
@@ -432,7 +495,8 @@ async def main_bot():
                 continue
 
             retry_count = 0
-            await asyncio.sleep(UPDATE_INTERVAL)
+            interval = bot_state.get("update_interval", UPDATE_INTERVAL)
+            await asyncio.sleep(interval)
 
         except FloodWait as e:
             logger.warning(f"FloodWait global: {e.value}s")
@@ -442,7 +506,6 @@ async def main_bot():
             logger.critical(f"Sesion invalida: {e}")
             bot_state["connected"] = False
             bot_state["error"] = str(e)
-            await send_notification(f"Bot DETENIDO - Sesion revocada: {e}")
             break
 
         except ConnectionError as e:
@@ -460,10 +523,9 @@ async def main_bot():
 
             if retry_count >= MAX_RETRIES:
                 logger.critical("Maximo reintentos. Reiniciando cliente...")
-                await send_notification(f"Bot reiniciandose - Error: {e}")
                 try:
                     await userbot.stop()
-                except Exception:
+                except:
                     pass
                 retry_count = 0
                 bot_state["connected"] = False
