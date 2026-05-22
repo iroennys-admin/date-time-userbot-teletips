@@ -12,6 +12,7 @@ import datetime
 import random
 import traceback
 import threading
+import urllib.request
 from pathlib import Path
 
 # ─── IMPORTAR PYROGRAM ANTES DE FLASK (en hilo principal) ──────────
@@ -291,6 +292,31 @@ async def main_bot():
 
             await asyncio.sleep(delay)
 
+# ─── Keep-Alive: evita que Render duerma el servicio ───────────────
+def keep_alive():
+    """Auto-ping cada 14 minutos para que Render no duerma el servicio free."""
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if not RENDER_URL:
+        # Intentar construir la URL desde el hostname de Render
+        RENDER_URL = os.environ.get("RENDER_SERVICE_URL", "")
+    
+    if RENDER_URL:
+        def ping():
+            while True:
+                try:
+                    urllib.request.urlopen(f"{RENDER_URL}/health", timeout=10)
+                    logger.debug(f"Keep-alive ping OK: {RENDER_URL}/health")
+                except Exception as e:
+                    logger.debug(f"Keep-alive ping fallo: {e}")
+                # Cada 14 minutos (Render duerme a los 15)
+                threading.Event().wait(14 * 60)
+        
+        ping_thread = threading.Thread(target=ping, daemon=True)
+        ping_thread.start()
+        logger.info(f"Keep-alive activado: ping cada 14 min a {RENDER_URL}/health")
+    else:
+        logger.warning("Keep-alive desactivado: no se encontro RENDER_EXTERNAL_URL")
+
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
@@ -307,6 +333,9 @@ if __name__ == "__main__":
         )
         flask_thread.start()
         logger.info(f"Flask health check en puerto {port}")
+
+        # Activar keep-alive
+        keep_alive()
 
         # Mantener el bot corriendo
         await bot_task
