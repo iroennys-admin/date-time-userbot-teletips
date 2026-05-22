@@ -331,6 +331,7 @@ async def main_bot():
         log_startup(f"Error al iniciar: {e}")
         bot_state["error"] = str(e)
 
+    log_startup("Entrando al bucle principal de actualizaciones...")
     while True:
         try:
             # Verificar reinicio solicitado
@@ -431,9 +432,11 @@ async def main_bot():
                     uptime_str=uptime_str,
                 )
 
+            log_startup(f"Generando imagen... path={image_path}")
             if image_path:
                 try:
                     await userbot.set_profile_photo(photo=image_path)
+                    log_startup("Foto de perfil actualizada OK")
                     logger.info("Foto de perfil actualizada")
                 except FloodWait as e:
                     logger.warning(f"FloodWait en foto: {e.value}s")
@@ -488,6 +491,7 @@ async def main_bot():
                 bot_state["last_update"] = now.isoformat()
                 bot_state["update_count"] += 1
                 last_success_time = time_mod.time()
+                log_startup(f"Perfil actualizado #{bot_state['update_count']}: {day_name} {time_str}")
                 logger.info(f"Perfil actualizado: {day_name} {time_str}")
             except FloodWait as e:
                 logger.warning(f"FloodWait en perfil: {e.value}s")
@@ -518,6 +522,7 @@ async def main_bot():
         except Exception as e:
             retry_count += 1
             delay = min(base_delay * (2 ** retry_count), 300)
+            log_startup(f"ERROR en bucle (intento {retry_count}): {e}")
             logger.error(f"Error inesperado (intento {retry_count}): {e}")
             logger.debug(traceback.format_exc())
 
