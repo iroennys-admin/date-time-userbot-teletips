@@ -432,17 +432,22 @@ async def main_bot():
                     uptime_str=uptime_str,
                 )
 
-            log_startup(f"Generando imagen... path={image_path}")
+            log_startup(f"Imagen generada: {image_path}")
             if image_path:
+                # Subir foto con timeout
                 try:
-                    await userbot.set_profile_photo(photo=image_path)
-                    log_startup("Foto de perfil actualizada OK")
+                    await asyncio.wait_for(userbot.set_profile_photo(photo=image_path), timeout=30)
+                    log_startup("Foto subida OK")
                     logger.info("Foto de perfil actualizada")
+                except asyncio.TimeoutError:
+                    log_startup("TIMEOUT subiendo foto (30s)")
+                    logger.warning("Timeout subiendo foto")
                 except FloodWait as e:
-                    logger.warning(f"FloodWait en foto: {e.value}s")
+                    log_startup(f"FloodWait foto: {e.value}s")
                     await asyncio.sleep(e.value)
                     continue
                 except Exception as e:
+                    log_startup(f"Error subiendo foto: {e}")
                     logger.error(f"Error actualizando foto: {e}")
 
                 # Eliminar foto anterior
@@ -450,10 +455,11 @@ async def main_bot():
                     photos = userbot.get_chat_photos("me")
                     async for i, photo in enumerate(photos):
                         if i >= 1:
-                            await userbot.delete_profile_photos(photo.file_id)
+                            await asyncio.wait_for(userbot.delete_profile_photos(photo.file_id), timeout=15)
+                            log_startup("Foto anterior eliminada")
                             break
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_startup(f"Error eliminando foto: {e}")
 
                 try:
                     Path(image_path).unlink(missing_ok=True)
