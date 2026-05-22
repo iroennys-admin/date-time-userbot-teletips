@@ -41,21 +41,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger("DateTimeUserbot")
 
-# ─── Variables de Entorno ─────────────────────────────────────────
-API_ID = int(os.environ.get("API_ID", "0"))
-API_HASH = os.environ.get("API_HASH", "")
-SESSION_STRING = os.environ.get("SESSION_STRING", "")
+# ─── Variables de Configuración ────────────────────────────────────
+# Las variables se cargan desde entorno SI existen, sino usan los valores hardcodeados
+
+API_ID = int(os.environ.get("API_ID", "14681595"))
+API_HASH = os.environ.get("API_HASH", "a86730aab5c59953c424abb4396d32d5")
+SESSION_STRING = os.environ.get("SESSION_STRING", "AQDgBfsAA1wQ2Lka011s9cskUPNHS4UIPGp8-C6KmTjZUEqoSrqL07TV_Wn4sihKBp4A5qag_e61zgJlfPdQrSfnqUhwKYVGn3rNsTCmMltVlA39AhFLWzyS_fToU3HwxYEn3VsutChqKCFArHZq08Fw_mZ__NETqeopo6zlnOKa_M-hF8xCiNeGukQ3zK076oRde9reAvF8IgRUEIUjp3OllhKU-6BFmC6WlOouJjobpBCzMc96m7QFV3p6jeauxTrhA_6fOGesFwuW65cEnXLBfI6SYtt_OgDC6iptax5UI-DgL3A12xEpje-X_EhPZ6L2ZmDF3NSy2wveIno9x90tNI-wFAAAAAHbE6seAA")
 TIME_ZONE = os.environ.get("TIME_ZONE", "America/Havana")
 UPDATE_INTERVAL = int(os.environ.get("UPDATE_INTERVAL", "60"))  # segundos
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "5"))
 FONT_PATH = os.environ.get("FONT_PATH", "ds-digit.ttf")
 BASE_IMAGE = os.environ.get("BASE_IMAGE", "image.jpg")
 
-# Validar variables obligatorias
-required_vars = {"API_ID": API_ID, "API_HASH": API_HASH, "SESSION_STRING": SESSION_STRING}
-missing = [k for k, v in required_vars.items() if not v or (k == "API_ID" and v == 0)]
-if missing:
-    logger.error(f"❌ Faltan variables de entorno obligatorias: {', '.join(missing)}")
+# Validar que las variables obligatorias estén presentes
+if not API_ID or API_ID == 0:
+    logger.error("❌ API_ID no configurado")
+    sys.exit(1)
+if not API_HASH:
+    logger.error("❌ API_HASH no configurado")
+    sys.exit(1)
+if not SESSION_STRING:
+    logger.error("❌ SESSION_STRING no configurado")
     sys.exit(1)
 
 # ─── Flask Health Check (requerido para Render) ───────────────────
