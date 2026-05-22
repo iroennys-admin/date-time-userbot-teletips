@@ -56,6 +56,9 @@ bot_state = {
     "update_interval": 60,
     "notes": {},
     "restart_requested": False,
+    "photo_flood_wait_until": 0,  # Timestamp hasta cuando no subir fotos
+    "photo_update_counter": 0,   # Cada cuantos ciclos subir foto
+    "last_photo_time": 0,        # Ultima vez que se subio foto
 }
 
 def log_startup(msg):
@@ -433,38 +436,64 @@ async def main_bot():
                 )
 
             log_startup(f"Imagen generada: {image_path}")
-            if image_path:
-                # Subir foto con timeout
+            
+            # Solo subir foto cada 5 ciclos (5 min) o si nunca se ha subido
+            should_upload_photo = (
+                bot_state.get("last_photo_time", 0) == 0 or  # Nunca subida
+                (current_time - bot_state.get("last_photo_time", 0)) >= 300  # 5 min desde ultima
+            )
+            
+            # No subir si estamos en FloodWait
+            if current_time < bot_state.get("photo_flood_wait_until", 0):
+                remaining = int(bot_state["photo_flood_wait_until"] - current_time)
+                should_upload_photo = False
+                if bot_state.get("photo_update_counter", 0) % 10 == 0:  # Log cada 10 ciclos
+                    log_startup(f"FloodWait activo, sin subir foto ({remaining}s restantes)")
+            
+            if image_path and should_upload_photo:
                 try:
                     await asyncio.wait_for(userbot.set_profile_photo(photo=image_path), timeout=30)
+                    bot_state["last_photo_time"] = time_mod.time()
                     log_startup("Foto subida OK")
                     logger.info("Foto de perfil actualizada")
                 except asyncio.TimeoutError:
                     log_startup("TIMEOUT subiendo foto (30s)")
                     logger.warning("Timeout subiendo foto")
                 except FloodWait as e:
-                    log_startup(f"FloodWait foto: {e.value}s")
-                    await asyncio.sleep(e.value)
-                    continue
+                    flood_until = time_mod.time() + e.value
+                    bot_state["photo_flood_wait_until"] = flood_until
+                    log_startup(f"FloodWait foto: {e.value}s. Sin subir hasta {flood_until}")
+                    logger.warning(f"FloodWait en foto: {e.value}s")
+                    # NO hacer await sleep del FloodWait completo
+                    await asyncio.sleep(5)  # Solo esperar 5s y continuar sin foto
                 except Exception as e:
                     log_startup(f"Error subiendo foto: {e}")
                     logger.error(f"Error actualizando foto: {e}")
 
-                # Eliminar foto anterior
-                try:
-                    photos = userbot.get_chat_photos("me")
-                    async for i, photo in enumerate(photos):
-                        if i >= 1:
-                            await asyncio.wait_for(userbot.delete_profile_photos(photo.file_id), timeout=15)
-                            log_startup("Foto anterior eliminada")
-                            break
-                except Exception as e:
-                    log_startup(f"Error eliminando foto: {e}")
+                # Eliminar foto anterior (solo si se subio OK)
+                if bot_state.get("last_photo_time", 0) > 0:
+                    try:
+                        photos = userbot.get_chat_photos("me")
+                        async for i, photo in enumerate(photos):
+                            if i >= 1:
+                                await asyncio.wait_for(userbot.delete_profile_photos(photo.file_id), timeout=15)
+                                break
+                    except Exception:
+                        pass
 
                 try:
                     Path(image_path).unlink(missing_ok=True)
                 except Exception:
                     pass
+            else:
+                # No subir foto este ciclo, solo limpiar
+                if image_path:
+                    try:
+                        Path(image_path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            
+            bot_state["photo_update_counter"] = bot_state.get("photo_update_counter", 0) + 1
 
             # ── Actualizar apellido ──
             custom_ln = bot_state.get("custom_last_name", "")
