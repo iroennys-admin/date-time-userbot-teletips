@@ -103,14 +103,32 @@ def debug_info():
 # ─── Bucle del Bot en Hilo Separado ────────────────────────────────
 def run_bot():
     """Ejecuta el bot de Telegram en su propio hilo con su propio event loop."""
+    bot_status["started"] = True
+    add_log("Bot thread iniciado, importando modulos...")
+
+    # Importar modulo por modulo con logging granular
     try:
-        add_log("Importando modulos del bot...")
+        add_log("Importando pyrogram...")
         from pyrogram import Client
+        add_log("pyrogram.Client OK")
+        
+        add_log("Importando pyrogram.errors...")
         from pyrogram.errors import FloodWait, AuthKeyUnregistered, SessionRevoked
+        add_log("pyrogram.errors OK")
+        
+        add_log("Importando PIL...")
         from PIL import Image, ImageDraw, ImageFont
+        add_log("PIL OK")
+        
+        add_log("Importando emojis...")
         from lists_teletips.emojis_teletips import emojis_teletips
+        add_log("emojis OK")
+        
+        add_log("Importando quotes...")
         from lists_teletips.quotes_teletips import quotes_teletips
-        add_log("Modulos importados OK")
+        add_log("quotes OK")
+        
+        add_log("Todos los modulos importados OK")
     except Exception as e:
         err = f"Error importando modulos: {e}\n{traceback.format_exc()}"
         add_log(err)
@@ -354,8 +372,7 @@ def run_bot():
                 await asyncio.sleep(delay)
 
     # Ejecutar el bot
-    bot_status["started"] = True
-    add_log("Bot thread iniciado")
+    add_log("Iniciando event loop con main_bot()...")
     try:
         loop.run_until_complete(main_bot())
     except Exception as e:
