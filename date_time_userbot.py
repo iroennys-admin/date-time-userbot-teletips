@@ -19,7 +19,7 @@ import pytz
 
 # ─── Configuración de Logging ────────────────────────────────────
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -41,8 +41,18 @@ bot_status = {
     "connected": False,
     "last_update": None,
     "error": None,
+    "error_trace": None,
     "profile_name": None,
+    "update_count": 0,
+    "log_lines": [],
 }
+
+def add_log(msg):
+    """Agrega línea de log al estado para verlo via /debug"""
+    bot_status["log_lines"].append(f"{datetime.datetime.utcnow().isoformat()} | {msg}")
+    # Mantener solo las últimas 50 líneas
+    if len(bot_status["log_lines"]) > 50:
+        bot_status["log_lines"] = bot_status["log_lines"][-50:]
 
 # ─── Flask App (servidor principal) ────────────────────────────────
 app = Flask(__name__)
@@ -55,6 +65,7 @@ def health_check():
         "connected": bot_status["connected"],
         "timezone": TIME_ZONE,
         "last_update": bot_status["last_update"],
+        "update_count": bot_status["update_count"],
         "timestamp": datetime.datetime.now(pytz.timezone(TIME_ZONE)).isoformat(),
     })
 
@@ -62,19 +73,56 @@ def health_check():
 def health():
     return jsonify({"status": "healthy", "bot_connected": bot_status["connected"]})
 
+@app.route("/debug")
+def debug_info():
+    """Muestra estado detallado del bot incluyendo errores y logs"""
+    return jsonify({
+        "status": "alive",
+        "bot_started": bot_status["started"],
+        "bot_connected": bot_status["connected"],
+        "profile_name": bot_status["profile_name"],
+        "last_update": bot_status["last_update"],
+        "update_count": bot_status["update_count"],
+        "error": bot_status["error"],
+        "error_trace": bot_status["error_trace"],
+        "api_id": API_ID,
+        "api_hash_set": bool(API_HASH),
+        "session_set": bool(SESSION_STRING),
+        "session_length": len(SESSION_STRING) if SESSION_STRING else 0,
+        "timezone": TIME_ZONE,
+        "update_interval": UPDATE_INTERVAL,
+        "files": {
+            "image_jpg": Path(BASE_IMAGE).exists(),
+            "ds_digit_ttf": Path(FONT_PATH).exists(),
+            "working_dir": os.getcwd(),
+            "dir_contents": os.listdir("."),
+        },
+        "recent_logs": bot_status["log_lines"][-20:],
+    })
+
 # ─── Bucle del Bot en Hilo Separado ────────────────────────────────
 def run_bot():
     """Ejecuta el bot de Telegram en su propio hilo con su propio event loop."""
-    # Importar dentro del hilo para evitar conflictos
-    from pyrogram import Client
-    from pyrogram.errors import FloodWait, AuthKeyUnregistered, SessionRevoked
-    from PIL import Image, ImageDraw, ImageFont
-    from lists_teletips.emojis_teletips import emojis_teletips
-    from lists_teletips.quotes_teletips import quotes_teletips
+    try:
+        add_log("Importando modulos del bot...")
+        from pyrogram import Client
+        from pyrogram.errors import FloodWait, AuthKeyUnregistered, SessionRevoked
+        from PIL import Image, ImageDraw, ImageFont
+        from lists_teletips.emojis_teletips import emojis_teletips
+        from lists_teletips.quotes_teletips import quotes_teletips
+        add_log("Modulos importados OK")
+    except Exception as e:
+        err = f"Error importando modulos: {e}\n{traceback.format_exc()}"
+        add_log(err)
+        logger.error(err)
+        bot_status["error"] = str(e)
+        bot_status["error_trace"] = traceback.format_exc()
+        return
 
     # Crear event loop propio para este hilo
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    add_log("Event loop creado")
 
     # ─── Generador de Imágenes ──────────────────────────────────────
     def generate_profile_image(time_str: str, date_str: str) -> str:
@@ -82,8 +130,10 @@ def run_bot():
         try:
             if Path(BASE_IMAGE).exists():
                 img = Image.open(BASE_IMAGE).resize((512, 512), Image.Resampling.LANCZOS)
+                add_log("Imagen base cargada")
             else:
                 img = create_gradient_background(512, 512)
+                add_log("Usando fondo degradado (no hay imagen base)")
 
             draw = ImageDraw.Draw(img)
 
@@ -92,10 +142,13 @@ def run_bot():
                 if Path(FONT_PATH).exists():
                     font_large = ImageFont.truetype(FONT_PATH, 72)
                     font_small = ImageFont.truetype(FONT_PATH, 36)
+                    add_log("Fuente ds-digit cargada")
                 else:
                     font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 72)
                     font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 36)
-            except Exception:
+                    add_log("Fuente DejaVu cargada (alternativa)")
+            except Exception as e:
+                add_log(f"Error con fuentes, usando default: {e}")
                 font_large = ImageFont.load_default()
                 font_small = ImageFont.load_default()
 
@@ -125,8 +178,10 @@ def run_bot():
             draw.text((date_x, date_y), date_str, (255, 255, 255), font=font_small)
 
             img.save(output_path, "JPEG", quality=95)
+            add_log(f"Imagen generada: {output_path}")
             return output_path
         except Exception as e:
+            add_log(f"Error generando imagen: {e}")
             logger.error(f"Error generando imagen: {e}")
             return None
 
@@ -141,18 +196,21 @@ def run_bot():
         return img
 
     # ─── Cliente Pyrogram ─────────────────────────────────────────────
+    add_log(f"Creando cliente Pyrogram (API_ID={API_ID})...")
     userbot = Client(
         name="date_time_userbot",
         api_id=API_ID,
         api_hash=API_HASH,
         session_string=SESSION_STRING,
     )
+    add_log("Cliente Pyrogram creado")
 
     # ─── Bucle Principal ──────────────────────────────────────────────
     async def main_bot():
         retry_count = 0
         base_delay = 5
 
+        add_log("Iniciando cliente Pyrogram...")
         logger.info("Iniciando cliente Pyrogram...")
 
         try:
@@ -160,18 +218,41 @@ def run_bot():
             me = await userbot.get_me()
             bot_status["connected"] = True
             bot_status["profile_name"] = me.first_name
+            add_log(f"CONECTADO como: {me.first_name} (ID: {me.id})")
             logger.info(f"Conectado como: {me.first_name} (ID: {me.id})")
         except (AuthKeyUnregistered, SessionRevoked) as e:
-            logger.critical(f"Sesion invalida o revocada: {e}")
+            err = f"Sesion invalida o revocada: {e}"
+            add_log(f"ERROR: {err}")
+            logger.critical(err)
             bot_status["error"] = str(e)
+            bot_status["error_trace"] = traceback.format_exc()
             return
         except Exception as e:
-            logger.error(f"Error al iniciar: {e}")
+            err = f"Error al iniciar Pyrogram: {e}"
+            add_log(f"ERROR: {err}")
+            logger.error(err)
+            logger.debug(traceback.format_exc())
             bot_status["error"] = str(e)
-            return
+            bot_status["error_trace"] = traceback.format_exc()
+            # No retornar, intentar reconectar
+            retry_count += 1
 
         while True:
             try:
+                if not bot_status["connected"]:
+                    add_log("Intentando reconectar...")
+                    try:
+                        await userbot.stop()
+                    except Exception:
+                        pass
+                    
+                    await userbot.start()
+                    me = await userbot.get_me()
+                    bot_status["connected"] = True
+                    bot_status["profile_name"] = me.first_name
+                    retry_count = 0
+                    add_log(f"RECONECTADO como: {me.first_name}")
+
                 tz = pytz.timezone(TIME_ZONE)
                 now = datetime.datetime.now(tz)
 
@@ -187,12 +268,15 @@ def run_bot():
                 if image_path:
                     try:
                         await userbot.set_profile_photo(photo=image_path)
+                        add_log("Foto de perfil actualizada")
                         logger.info("Foto de perfil actualizada")
                     except FloodWait as e:
+                        add_log(f"FloodWait foto: {e.value}s")
                         logger.warning(f"FloodWait en foto: {e.value}s")
                         await asyncio.sleep(e.value)
                         continue
                     except Exception as e:
+                        add_log(f"Error actualizando foto: {e}")
                         logger.error(f"Error actualizando foto: {e}")
 
                     # Eliminar foto anterior
@@ -217,8 +301,11 @@ def run_bot():
                 try:
                     await userbot.update_profile(last_name=last_name, bio=bio)
                     bot_status["last_update"] = now.isoformat()
+                    bot_status["update_count"] += 1
+                    add_log(f"Perfil actualizado: {day_name} {time_str}")
                     logger.info(f"Perfil actualizado: {day_name} {time_str}")
                 except FloodWait as e:
+                    add_log(f"FloodWait perfil: {e.value}s")
                     logger.warning(f"FloodWait en perfil: {e.value}s")
                     await asyncio.sleep(e.value)
                     continue
@@ -227,30 +314,36 @@ def run_bot():
                 await asyncio.sleep(UPDATE_INTERVAL)
 
             except FloodWait as e:
+                add_log(f"FloodWait global: {e.value}s")
                 logger.warning(f"FloodWait global: {e.value}s")
                 await asyncio.sleep(e.value)
 
             except (AuthKeyUnregistered, SessionRevoked) as e:
+                add_log(f"SESION INVALIDA: {e}")
                 logger.critical(f"Sesion invalida: {e}")
                 bot_status["connected"] = False
                 bot_status["error"] = str(e)
+                bot_status["error_trace"] = traceback.format_exc()
                 break
 
             except ConnectionError as e:
                 retry_count += 1
                 delay = min(base_delay * (2 ** retry_count), 300)
-                logger.error(f"Error de conexion (intento {retry_count}/{MAX_RETRIES}): {e}")
+                add_log(f"Error de conexion (intento {retry_count}): {e}")
+                logger.error(f"Error de conexion (intento {retry_count}): {e}")
                 bot_status["connected"] = False
                 await asyncio.sleep(delay)
 
             except Exception as e:
                 retry_count += 1
                 delay = min(base_delay * (2 ** retry_count), 300)
-                logger.error(f"Error inesperado (intento {retry_count}/{MAX_RETRIES}): {e}")
+                add_log(f"Error inesperado (intento {retry_count}): {e}")
+                logger.error(f"Error inesperado (intento {retry_count}): {e}")
                 logger.debug(traceback.format_exc())
 
                 if retry_count >= MAX_RETRIES:
-                    logger.critical("Maximo de reintentos alcanzado. Reiniciando...")
+                    add_log("Maximo reintentos. Reiniciando cliente...")
+                    logger.critical("Maximo de reintentos alcanzado.")
                     try:
                         await userbot.stop()
                     except Exception:
@@ -258,19 +351,19 @@ def run_bot():
                     retry_count = 0
                     bot_status["connected"] = False
 
-                    # Intentar reconectar
-                    try:
-                        await userbot.start()
-                        bot_status["connected"] = True
-                        logger.info("Reconectado exitosamente")
-                    except Exception as re:
-                        logger.error(f"Error reconectando: {re}")
-
                 await asyncio.sleep(delay)
 
     # Ejecutar el bot
     bot_status["started"] = True
-    loop.run_until_complete(main_bot())
+    add_log("Bot thread iniciado")
+    try:
+        loop.run_until_complete(main_bot())
+    except Exception as e:
+        err = f"Error fatal en bot thread: {e}\n{traceback.format_exc()}"
+        add_log(err)
+        logger.critical(err)
+        bot_status["error"] = str(e)
+        bot_status["error_trace"] = traceback.format_exc()
 
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
