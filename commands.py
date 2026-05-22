@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Comandos de Telegram para controlar el bot."""
+"""Comandos de Telegram para controlar el bot. Prefijo: . (punto)"""
 
 from pyrogram import Client, filters
 from config import (
@@ -8,13 +8,16 @@ from config import (
     BIO_SHOW_COUNTER, COUNTDOWN_DATE, COUNTDOWN_LABEL
 )
 
+# Prefijo para comandos (punto, como es tradicion en userbots)
+CMD_PREFIXES = [".", "/", "!"]
+
 
 def register_commands(app: Client, bot_state: dict):
     """Registra todos los comandos del bot."""
     
-    @app.on_message(filters.command("style") & filters.me)
+    @app.on_message(filters.command("style", prefixes=CMD_PREFIXES) & filters.me)
     async def style_command(client, message):
-        """Cambia el estilo de imagen. Uso: .style neon|retro|minimal|gradient|auto"""
+        """Cambia el estilo de imagen."""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             styles = "auto, neon, retro, minimal, gradient"
@@ -24,25 +27,25 @@ def register_commands(app: Client, bot_state: dict):
         new_style = args[1].strip().lower()
         valid = ["auto", "neon", "retro", "minimal", "gradient"]
         if new_style not in valid:
-            await message.edit(f"❌ Estilo inválido. Opciones: {', '.join(valid)}")
+            await message.edit(f"❌ Estilo invalido. Opciones: {', '.join(valid)}")
             return
         
         bot_state["image_style"] = new_style
         await message.edit(f"✅ Estilo cambiado a: **{new_style}**")
     
-    @app.on_message(filters.command("quote") & filters.me)
+    @app.on_message(filters.command("quote", prefixes=CMD_PREFIXES) & filters.me)
     async def quote_command(client, message):
-        """Cambia categoría de frases. Uso: .quote motivation|humor|philosophy|love|tech|life|random|schedule"""
+        """Cambia categoria de frases."""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             cats = "random, motivation, humor, philosophy, love, tech, life, schedule"
-            await message.edit(f"📋 Categorías: {cats}\nUso: `.quote humor`")
+            await message.edit(f"📋 Categorias: {cats}\nUso: `.quote humor`")
             return
         
         new_cat = args[1].strip().lower()
         valid = ["random", "motivation", "humor", "philosophy", "love", "tech", "life", "schedule"]
         if new_cat not in valid:
-            await message.edit(f"❌ Categoría inválida. Opciones: {', '.join(valid)}")
+            await message.edit(f"❌ Categoria invalida. Opciones: {', '.join(valid)}")
             return
         
         if new_cat == "schedule":
@@ -52,11 +55,11 @@ def register_commands(app: Client, bot_state: dict):
             bot_state["schedule_mode"] = False
             bot_state["bio_category"] = new_cat
         
-        await message.edit(f"✅ Categoría de frases: **{new_cat}**")
+        await message.edit(f"✅ Categoria de frases: **{new_cat}**")
     
-    @app.on_message(filters.command("weather") & filters.me)
+    @app.on_message(filters.command("weather", prefixes=CMD_PREFIXES) & filters.me)
     async def weather_command(client, message):
-        """Activa/desactiva clima. Uso: .weather on|off"""
+        """Activa/desactiva clima."""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             status = "✅ ON" if bot_state.get("show_weather", True) else "❌ OFF"
@@ -68,13 +71,13 @@ def register_commands(app: Client, bot_state: dict):
         status = "✅ activado" if bot_state["show_weather"] else "❌ desactivado"
         await message.edit(f"🌤 Clima {status}")
     
-    @app.on_message(filters.command("progress") & filters.me)
+    @app.on_message(filters.command("progress", prefixes=CMD_PREFIXES) & filters.me)
     async def progress_command(client, message):
-        """Activa/desactiva barra de progreso. Uso: .progress on|off"""
+        """Activa/desactiva barra de progreso."""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             status = "✅ ON" if bot_state.get("show_progress", True) else "❌ OFF"
-            await message.edit(f"📊 Progreso del día: {status}\nUso: `.progress on` o `.progress off`")
+            await message.edit(f"📊 Progreso del dia: {status}\nUso: `.progress on` o `.progress off`")
             return
         
         val = args[1].strip().lower()
@@ -82,13 +85,13 @@ def register_commands(app: Client, bot_state: dict):
         status = "✅ activado" if bot_state["show_progress"] else "❌ desactivado"
         await message.edit(f"📊 Progreso {status}")
     
-    @app.on_message(filters.command("countdown") & filters.me)
+    @app.on_message(filters.command("countdown", prefixes=CMD_PREFIXES) & filters.me)
     async def countdown_command(client, message):
-        """Configura countdown. Uso: .countdown 2027-01-01 Mi cumpleaños"""
+        """Configura countdown."""
         args = message.text.split(maxsplit=2)
         if len(args) < 2:
             current = f"{COUNTDOWN_DATE}" if COUNTDOWN_DATE else "No configurado"
-            await message.edit(f"📅 Countdown actual: {current}\nUso: `.countdown 2027-01-01 Mi cumpleaños`")
+            await message.edit(f"📅 Countdown actual: {current}\nUso: `.countdown 2027-01-01 Mi cumpleanos`")
             return
         
         if args[1].lower() in ("off", "clear", "remove"):
@@ -101,9 +104,9 @@ def register_commands(app: Client, bot_state: dict):
         bot_state["countdown_label"] = args[2] if len(args) > 2 else ""
         await message.edit(f"📅 Countdown: **{args[1]}** - {bot_state['countdown_label']}")
     
-    @app.on_message(filters.command("afk") & filters.me)
+    @app.on_message(filters.command("afk", prefixes=CMD_PREFIXES) & filters.me)
     async def afk_command(client, message):
-        """Activa/desactiva modo AFK. Uso: .afk on|off o .afk Mi mensaje personalizado"""
+        """Activa/desactiva modo AFK."""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             status = "✅ ON" if bot_state.get("afk_enabled", False) else "❌ OFF"
@@ -123,7 +126,7 @@ def register_commands(app: Client, bot_state: dict):
             bot_state["afk_message"] = args[1]
             await message.edit(f"📴 Modo AFK **activado** con mensaje: {args[1]}")
     
-    @app.on_message(filters.command("status") & filters.me)
+    @app.on_message(filters.command("status", prefixes=CMD_PREFIXES) & filters.me)
     async def status_command(client, message):
         """Muestra el estado actual del bot."""
         state = bot_state
@@ -131,37 +134,38 @@ def register_commands(app: Client, bot_state: dict):
             f"🤖 **DateTime Userbot - Estado**\n\n"
             f"🔌 Conectado: {'✅' if state.get('connected') else '❌'}\n"
             f"🎨 Estilo: {state.get('image_style', 'auto')}\n"
-            f"💬 Categoría frases: {state.get('bio_category', 'random')}\n"
+            f"💬 Categoria frases: {state.get('bio_category', 'random')}\n"
             f"🕐 Horario mode: {'✅' if state.get('schedule_mode', True) else '❌'}\n"
             f"🌤 Clima: {'✅' if state.get('show_weather', True) else '❌'}\n"
             f"📊 Progreso: {'✅' if state.get('show_progress', True) else '❌'}\n"
             f"📴 AFK: {'✅' if state.get('afk_enabled', False) else '❌'}\n"
             f"📅 Countdown: {state.get('countdown_date', 'No')}\n"
             f"🔄 Actualizaciones: {state.get('update_count', 0)}\n"
-            f"⏰ Última: {state.get('last_update', 'N/A')}"
+            f"⏰ Ultima: {state.get('last_update', 'N/A')}"
         )
         await message.edit(text)
     
-    @app.on_message(filters.command("help") & filters.me)
+    @app.on_message(filters.command("help", prefixes=CMD_PREFIXES) & filters.me)
     async def help_command(client, message):
         """Muestra la ayuda."""
         text = (
             "🤖 **DateTime Userbot - Comandos**\n\n"
             "🎨 `.style [auto|neon|retro|minimal|gradient]` - Cambiar estilo\n"
-            "💬 `.quote [random|motivation|humor|philosophy|love|tech|life|schedule]` - Categoría frases\n"
+            "💬 `.quote [random|motivation|humor|philosophy|love|tech|life|schedule]` - Categoria frases\n"
             "🌤 `.weather [on|off]` - Mostrar clima\n"
             "📊 `.progress [on|off]` - Barra de progreso\n"
             "📅 `.countdown [fecha|off] [label]` - Cuenta regresiva\n"
             "📴 `.afk [on|off|mensaje]` - Modo AFK\n"
             "📋 `.status` - Estado del bot\n"
-            "❓ `.help` - Esta ayuda"
+            "❓ `.help` - Esta ayuda\n\n"
+            "💡 Tambien funciona con / y ! (ej: /style neon o !help)"
         )
         await message.edit(text)
     
     # ─── Handler AFK ───────────────────────────────────────────────
     @app.on_message(filters.private & ~filters.me)
     async def afk_handler(client, message):
-        """Responde automáticamente cuando AFK está activo."""
+        """Responde automaticamente cuando AFK esta activo."""
         if not bot_state.get("afk_enabled", False):
             return
         
@@ -169,7 +173,7 @@ def register_commands(app: Client, bot_state: dict):
         replied_set = bot_state.get("afk_replied", set())
         
         if user_id not in replied_set:
-            afk_msg = bot_state.get("afk_message", "No estoy disponible ahora. Te responderé lo antes posible.")
+            afk_msg = bot_state.get("afk_message", "No estoy disponible ahora. Te respondere lo antes posible.")
             try:
                 await message.reply(f"📴 {afk_msg}")
                 replied_set.add(user_id)
@@ -178,4 +182,4 @@ def register_commands(app: Client, bot_state: dict):
                 pass
     
     logger = __import__('logging').getLogger("DateTimeUserbot")
-    logger.info("Comandos de Telegram registrados")
+    logger.info("Comandos de Telegram registrados con prefijos: . / !")
