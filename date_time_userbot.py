@@ -224,7 +224,7 @@ if pyrogram_ok:
 # ─── Registrar Dashboard ──────────────────────────────────────────
 try:
     from dashboard import register_dashboard
-    register_dashboard(app, bot_state, config=__import__('config'))
+    register_dashboard(app, bot_state, config_module=__import__('config'))
     log_startup("Dashboard registrado")
 except Exception as e:
     log_startup(f"ERROR registrando dashboard: {e}")
