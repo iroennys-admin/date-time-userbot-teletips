@@ -1,20 +1,41 @@
 services:
   - type: web
-    name: datetime-userbot
-    runtime: python
+    name: date-time-userbot-teletips
+    env: python
+    region: oregon
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python3 date_time_userbot.py
-    plan: free
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       - key: API_ID
-        sync: false
+        value: "14681595"
       - key: API_HASH
-        sync: false
+        value: a86730aab5c59953c424abb4396d32d5
       - key: SESSION_STRING
         sync: false
       - key: TIME_ZONE
         value: America/Havana
       - key: UPDATE_INTERVAL
         value: "60"
-      - key: MAX_RETRIES
-        value: "5"
+      - key: WEATHER_CITY
+        value: Havana
+      - key: WEATHER_SHOW
+        value: "true"
+      - key: SHOW_DAY_PROGRESS
+        value: "true"
+      - key: DYNAMIC_HOUR_EMOJI
+        value: "true"
+      - key: AFK_ENABLED
+        value: "true"
+      - key: BIO_SCHEDULE_MODE
+        value: "true"
+      - key: BIO_SHOW_COUNTER
+        value: "true"
+      - key: IMAGE_STYLE
+        value: auto
+      - key: BIO_CATEGORY
+        value: random
+      - key: MONITOR_TIMEOUT
+        value: "300"

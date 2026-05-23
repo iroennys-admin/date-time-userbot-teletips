@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-DATE TIME USERBOT v2.0 - Version Completa con todas las mejoras
-Flask arranca PRIMERO, Pyrogram se inicializa despues.
+DATE TIME USERBOT v3.0 - Maquina Potente
+Flask arranca PRIMERO, Pyrogram despues.
+Fix: Bucle de reconexion, Python 3.11, nuevos comandos poderosos.
 """
 
 import os
@@ -27,7 +28,7 @@ logger = logging.getLogger("DateTimeUserbot")
 bot_state = {
     "started": False,
     "connected": False,
-    "bot_active": True,  # on/off del bot
+    "bot_active": True,
     "last_update": None,
     "error": None,
     "startup_log": [],
@@ -56,15 +57,19 @@ bot_state = {
     "update_interval": 60,
     "notes": {},
     "restart_requested": False,
-    "photo_flood_wait_until": 0,  # Timestamp hasta cuando no subir fotos
-    "photo_update_counter": 0,   # Cada cuantos ciclos subir foto
-    "last_photo_time": 0,        # Ultima vez que se subio foto
+    "photo_flood_wait_until": 0,
+    "photo_update_counter": 0,
+    "last_photo_time": 0,
+    "reminders": [],
+    "pm_permit": False,
+    "approved_users": set(),
+    "sed_count": 0,
 }
 
 def log_startup(msg):
     logger.info(msg)
     bot_state["startup_log"].append(f"{datetime.datetime.now().strftime('%H:%M:%S')} | {msg}")
-    bot_state["startup_log"] = bot_state["startup_log"][-30:]
+    bot_state["startup_log"] = bot_state["startup_log"][-50:]
 
 # ─── Flask App (arranca PRIMERO) ─────────────────────────────────
 from flask import Flask, jsonify
@@ -74,7 +79,7 @@ app = Flask(__name__)
 def health_check():
     return jsonify({
         "status": "alive",
-        "bot": "DateTimeUserbot v2.0",
+        "bot": "DateTimeUserbot v3.0",
         "connected": bot_state["connected"],
         "bot_active": bot_state["bot_active"],
         "last_update": bot_state["last_update"],
@@ -109,11 +114,12 @@ def debug_info():
         "countdown": bot_state["countdown_date"],
         "update_interval": bot_state.get("update_interval", 60),
         "notes_count": len(bot_state.get("notes", {})),
+        "reminders_count": len(bot_state.get("reminders", [])),
         "python_version": sys.version,
         "startup_log": bot_state["startup_log"],
     })
 
-log_startup("Flask app creada")
+log_startup("Flask app creada - v3.0")
 
 # ─── Cargar configuracion ────────────────────────────────────────
 try:
@@ -264,6 +270,27 @@ async def send_notification(message: str):
     except Exception as e:
         logger.debug(f"No se pudo enviar notificacion: {e}")
 
+# ─── Procesar recordatorios ───────────────────────────────────────
+async def process_reminders():
+    """Verifica y envia recordatorios pendientes."""
+    if not userbot or not bot_state["connected"]:
+        return
+    
+    now = time_mod.time()
+    remaining = []
+    for rem in bot_state.get("reminders", []):
+        if now >= rem["trigger_time"]:
+            try:
+                await userbot.send_message(
+                    rem["chat_id"],
+                    f"⏰ **Recordatorio!**\n\n{rem['text']}"
+                )
+            except Exception as e:
+                logger.debug(f"Error enviando recordatorio: {e}")
+        else:
+            remaining.append(rem)
+    bot_state["reminders"] = remaining
+
 # ─── Calcular Countdown ───────────────────────────────────────────
 def get_countdown_days() -> tuple:
     cd_date = bot_state.get("countdown_date", "")
@@ -314,9 +341,11 @@ async def main_bot():
     retry_count = 0
     base_delay = 5
     last_success_time = 0
+    monitor_enabled = False  # Solo activar despues del primer update exitoso
+    consecutive_failures = 0
 
     bot_state["started"] = True
-    log_startup("Iniciando bucle principal...")
+    log_startup("Iniciando bucle principal v3.0...")
 
     # Conectar
     try:
@@ -325,7 +354,9 @@ async def main_bot():
         bot_state["connected"] = True
         bot_state["profile_name"] = me.first_name
         bot_state["start_time"] = time_mod.time()
+        last_success_time = time_mod.time()  # FIX: Inicializar tras conexion
         log_startup(f"Conectado como: {me.first_name} (ID: {me.id})")
+        await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
     except (AuthKeyUnregistered, SessionRevoked) as e:
         log_startup(f"Sesion invalida: {e}")
         bot_state["error"] = str(e)
@@ -351,29 +382,55 @@ async def main_bot():
                 me = await userbot.get_me()
                 bot_state["connected"] = True
                 bot_state["profile_name"] = me.first_name
+                last_success_time = time_mod.time()
+                consecutive_failures = 0
+                monitor_enabled = True
                 log_startup(f"Reiniciado como: {me.first_name}")
                 continue
 
-            # Reconexion si esta desconectado
+            # Reconexion si esta desconectado (con backoff)
             if not bot_state["connected"]:
-                log_startup("Intentando reconectar...")
+                retry_count += 1
+                delay = min(base_delay * (2 ** min(retry_count, 6)), 300)
+                log_startup(f"Intentando reconectar (intento {retry_count}, esperando {delay}s)...")
                 try:
                     await userbot.stop()
                 except:
                     pass
-                await userbot.start()
-                me = await userbot.get_me()
-                bot_state["connected"] = True
-                bot_state["profile_name"] = me.first_name
-                retry_count = 0
-                log_startup(f"Reconectado como: {me.first_name}")
+                await asyncio.sleep(delay)
+                try:
+                    await userbot.start()
+                    me = await userbot.get_me()
+                    bot_state["connected"] = True
+                    bot_state["profile_name"] = me.first_name
+                    last_success_time = time_mod.time()
+                    retry_count = 0
+                    consecutive_failures = 0
+                    monitor_enabled = True
+                    log_startup(f"Reconectado como: {me.first_name}")
+                except (AuthKeyUnregistered, SessionRevoked) as e:
+                    log_startup(f"Sesion invalida al reconectar: {e}")
+                    bot_state["error"] = str(e)
+                    bot_state["connected"] = False
+                    await asyncio.sleep(60)
+                    continue
+                except Exception as e:
+                    log_startup(f"Error reconectando: {e}")
+                    bot_state["connected"] = False
+                    continue
 
-            # Monitoreo proactivo
-            current_time = time_mod.time()
-            if last_success_time > 0 and (current_time - last_success_time) > MONITOR_TIMEOUT:
-                log_startup(f"No se actualizo en {MONITOR_TIMEOUT}s. Forzando reconexion...")
-                bot_state["connected"] = False
-                continue
+            # Monitoreo proactivo (solo si ya hubo al menos 1 update exitoso)
+            if monitor_enabled and last_success_time > 0:
+                current_time = time_mod.time()
+                time_since_last = current_time - last_success_time
+                if time_since_last > MONITOR_TIMEOUT:
+                    log_startup(f"No se actualizo en {int(time_since_last)}s. Forzando reconexion...")
+                    bot_state["connected"] = False
+                    monitor_enabled = False  # Desactivar monitor hasta reconectar
+                    continue
+
+            # Procesar recordatorios
+            await process_reminders()
 
             # Si el bot esta PAUSADO (.off), solo dormir
             if not bot_state.get("bot_active", True):
@@ -435,42 +492,36 @@ async def main_bot():
                     uptime_str=uptime_str,
                 )
 
-            log_startup(f"Imagen generada: {image_path}")
-            
             # Solo subir foto cada 5 ciclos (5 min) o si nunca se ha subido
+            current_time = time_mod.time()
             should_upload_photo = (
-                bot_state.get("last_photo_time", 0) == 0 or  # Nunca subida
-                (current_time - bot_state.get("last_photo_time", 0)) >= 300  # 5 min desde ultima
+                bot_state.get("last_photo_time", 0) == 0 or
+                (current_time - bot_state.get("last_photo_time", 0)) >= 300
             )
-            
+
             # No subir si estamos en FloodWait
             if current_time < bot_state.get("photo_flood_wait_until", 0):
                 remaining = int(bot_state["photo_flood_wait_until"] - current_time)
                 should_upload_photo = False
-                if bot_state.get("photo_update_counter", 0) % 10 == 0:  # Log cada 10 ciclos
-                    log_startup(f"FloodWait activo, sin subir foto ({remaining}s restantes)")
+                if bot_state.get("photo_update_counter", 0) % 10 == 0:
+                    log_startup(f"FloodWait activo ({remaining}s restantes)")
             
             if image_path and should_upload_photo:
                 try:
                     await asyncio.wait_for(userbot.set_profile_photo(photo=image_path), timeout=30)
                     bot_state["last_photo_time"] = time_mod.time()
                     log_startup("Foto subida OK")
-                    logger.info("Foto de perfil actualizada")
                 except asyncio.TimeoutError:
                     log_startup("TIMEOUT subiendo foto (30s)")
-                    logger.warning("Timeout subiendo foto")
                 except FloodWait as e:
                     flood_until = time_mod.time() + e.value
                     bot_state["photo_flood_wait_until"] = flood_until
-                    log_startup(f"FloodWait foto: {e.value}s. Sin subir hasta {flood_until}")
-                    logger.warning(f"FloodWait en foto: {e.value}s")
-                    # NO hacer await sleep del FloodWait completo
-                    await asyncio.sleep(5)  # Solo esperar 5s y continuar sin foto
+                    log_startup(f"FloodWait foto: {e.value}s")
+                    await asyncio.sleep(5)
                 except Exception as e:
                     log_startup(f"Error subiendo foto: {e}")
-                    logger.error(f"Error actualizando foto: {e}")
 
-                # Eliminar foto anterior (solo si se subio OK)
+                # Eliminar foto anterior
                 if bot_state.get("last_photo_time", 0) > 0:
                     try:
                         photos = userbot.get_chat_photos("me")
@@ -486,7 +537,6 @@ async def main_bot():
                 except Exception:
                     pass
             else:
-                # No subir foto este ciclo, solo limpiar
                 if image_path:
                     try:
                         Path(image_path).unlink(missing_ok=True)
@@ -508,7 +558,6 @@ async def main_bot():
                 bio = custom_bio
             else:
                 bio_parts = []
-                # Mood bio override
                 mood_bio = bot_state.get("mood_bio", "")
                 if mood_bio:
                     bio_parts.append(mood_bio)
@@ -526,11 +575,13 @@ async def main_bot():
                 bot_state["last_update"] = now.isoformat()
                 bot_state["update_count"] += 1
                 last_success_time = time_mod.time()
-                log_startup(f"Perfil actualizado #{bot_state['update_count']}: {day_name} {time_str}")
-                logger.info(f"Perfil actualizado: {day_name} {time_str}")
+                consecutive_failures = 0
+                monitor_enabled = True  # Activar monitor tras primer update
+                if bot_state["update_count"] % 10 == 0:
+                    log_startup(f"Perfil actualizado #{bot_state['update_count']}: {day_name} {time_str}")
             except FloodWait as e:
                 logger.warning(f"FloodWait en perfil: {e.value}s")
-                await asyncio.sleep(e.value)
+                await asyncio.sleep(min(e.value, 60))
                 continue
 
             retry_count = 0
@@ -539,7 +590,7 @@ async def main_bot():
 
         except FloodWait as e:
             logger.warning(f"FloodWait global: {e.value}s")
-            await asyncio.sleep(e.value)
+            await asyncio.sleep(min(e.value, 120))
 
         except (AuthKeyUnregistered, SessionRevoked) as e:
             logger.critical(f"Sesion invalida: {e}")
@@ -549,26 +600,30 @@ async def main_bot():
 
         except ConnectionError as e:
             retry_count += 1
-            delay = min(base_delay * (2 ** retry_count), 300)
+            consecutive_failures += 1
+            delay = min(base_delay * (2 ** min(retry_count, 6)), 300)
             logger.error(f"Error de conexion (intento {retry_count}): {e}")
             bot_state["connected"] = False
             await asyncio.sleep(delay)
 
         except Exception as e:
             retry_count += 1
-            delay = min(base_delay * (2 ** retry_count), 300)
+            consecutive_failures += 1
+            delay = min(base_delay * (2 ** min(retry_count, 6)), 300)
             log_startup(f"ERROR en bucle (intento {retry_count}): {e}")
             logger.error(f"Error inesperado (intento {retry_count}): {e}")
             logger.debug(traceback.format_exc())
 
-            if retry_count >= MAX_RETRIES:
-                logger.critical("Maximo reintentos. Reiniciando cliente...")
+            if consecutive_failures >= MAX_RETRIES * 3:
+                logger.critical("Demasiados fallos consecutivos. Reiniciando cliente...")
                 try:
                     await userbot.stop()
                 except:
                     pass
                 retry_count = 0
+                consecutive_failures = 0
                 bot_state["connected"] = False
+                monitor_enabled = False
 
             await asyncio.sleep(delay)
 
@@ -597,7 +652,7 @@ def keep_alive():
 
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
-    log_startup("=== DateTime Userbot v2.0 iniciando ===")
+    log_startup("=== DateTime Userbot v3.0 iniciando ===")
     
     async def run_all():
         bot_task = asyncio.ensure_future(main_bot())

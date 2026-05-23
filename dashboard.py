@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dashboard web para monitorear y configurar el bot."""
+"""Dashboard web para monitorear y configurar el bot v3.0."""
 
 import datetime
 import time as time_mod
@@ -42,8 +42,10 @@ def register_dashboard(app, bot_state, config_module=None):
         cd_date = bot_state.get("countdown_date", "") or "No"
         cd_label = bot_state.get("countdown_label", "")
         notes_count = len(bot_state.get("notes", {}))
+        reminders_count = len(bot_state.get("reminders", []))
+        pm_permit = bot_state.get("pm_permit", False)
+        sed_count = bot_state.get("sed_count", 0)
         
-        # Status classes
         state_class = "active" if active else "paused"
         state_text = "✅ Activo" if active else "⏸️ Pausado"
         state_sub = ("Conectado: " + str(profile_name)) if connected else "Desconectado"
@@ -54,11 +56,13 @@ def register_dashboard(app, bot_state, config_module=None):
         p_text = "ON" if show_p else "OFF"
         a_class = "on" if afk_on else "off"
         a_text = "ON" if afk_on else "OFF"
+        pm_class = "on" if pm_permit else "off"
+        pm_text = "ON" if pm_permit else "OFF"
         
         html = """<!DOCTYPE html>
 <html>
 <head>
-    <title>DateTime Userbot Dashboard</title>
+    <title>DateTime Userbot v3.0 Dashboard</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -94,7 +98,7 @@ def register_dashboard(app, bot_state, config_module=None):
 </head>
 <body>
     <div class="container">
-        <h1>🤖 DateTime Userbot v2.0</h1>
+        <h1>🤖 DateTime Userbot v3.0</h1>
         <div class="grid">
             <div class="card">
                 <h3>⚡ Estado</h3>
@@ -156,24 +160,37 @@ def register_dashboard(app, bot_state, config_module=None):
                 <div class="value">%s</div>
                 <div class="sub">Guardadas</div>
             </div>
+            <div class="card">
+                <h3>⏰ Recordatorios</h3>
+                <div class="value">%s</div>
+                <div class="sub">Pendientes</div>
+            </div>
+            <div class="card">
+                <h3>🛡️ PM Permit</h3>
+                <div class="%s">%s</div>
+                <div class="sub">Anti-spam</div>
+            </div>
+            <div class="card">
+                <h3>🔀 SED</h3>
+                <div class="value">%s</div>
+                <div class="sub">Ediciones</div>
+            </div>
         </div>
         <div class="section">
-            <h2>📋 Comandos de Telegram</h2>
+            <h2>📋 Comandos de Telegram v3.0</h2>
             <div class="cmd"><b>.on</b> / <b>.off</b> — Activar/Pausar bot</div>
             <div class="cmd"><b>.style</b> [auto|neon|retro|minimal|gradient] — Estilo</div>
             <div class="cmd"><b>.theme</b> [anime|code|gaming|nature|cyberpunk|ocean|sunset|galaxy|retro|minimal|off] — Tema</div>
             <div class="cmd"><b>.mood</b> [happy|sad|busy|sleeping|love|gaming|coding|music|coffee|vibes|angry|chill|off] — Mood</div>
-            <div class="cmd"><b>.quote</b> [random|motivation|humor|philosophy|love|tech|life|schedule] — Frases</div>
-            <div class="cmd"><b>.bio</b> [texto|off] — Bio personalizada</div>
-            <div class="cmd"><b>.name</b> [texto|off] — Apellido personalizado</div>
-            <div class="cmd"><b>.interval</b> [30-600] — Segundos entre updates</div>
-            <div class="cmd"><b>.weather</b> [on|off] / <b>.progress</b> [on|off] — Clima y progreso</div>
-            <div class="cmd"><b>.countdown</b> [fecha|off] [label] / <b>.afk</b> [on|off|msg] — Extras</div>
-            <div class="cmd"><b>.note</b> [save|get|list|del] — Notas personales</div>
-            <div class="cmd"><b>.whois</b> / <b>.id</b> / <b>.ping</b> — Utilidades</div>
-            <div class="cmd"><b>.status</b> / <b>.restart</b> / <b>.help</b> — Control</div>
+            <div class="cmd"><b>.quote</b> / <b>.bio</b> / <b>.name</b> / <b>.interval</b> — Bio y perfil</div>
+            <div class="cmd"><b>.weather</b> / <b>.progress</b> / <b>.countdown</b> / <b>.afk</b> — Extras</div>
+            <div class="cmd"><b>.note</b> / <b>.remind</b> / <b>.calc</b> / <b>.tr</b> / <b>.qr</b> / <b>.short</b> — Utilidades</div>
+            <div class="cmd"><b>.purge</b> / <b>.del</b> / <b>.delme</b> / <b>.save</b> — Mensajes</div>
+            <div class="cmd"><b>.kang</b> / <b>.clone</b> / <b>.exec</b> / <b>.eval</b> / <b>.speedtest</b> — Poder</div>
+            <div class="cmd"><b>.pmpermit</b> / <b>.whois</b> / <b>.id</b> / <b>.ping</b> / <b>.sysinfo</b> — Info</div>
+            <div class="cmd"><b>s/old/new/</b> — Reemplazar texto en mensajes</div>
         </div>
-        <div class="refresh">Auto-refresh 30s | 🤖 v2.1</div>
+        <div class="refresh">Auto-refresh 30s | 🤖 v3.0 Maquina Potente</div>
     </div>
 </body>
 </html>""" % (
@@ -190,12 +207,22 @@ def register_dashboard(app, bot_state, config_module=None):
             interval,
             cd_date, cd_label,
             notes_count,
+            reminders_count,
+            pm_class, pm_text,
+            sed_count,
         )
         return html
     
     @app.route("/api/status")
     def api_status():
-        return jsonify(bot_state)
+        # Convertir sets a listas para JSON
+        safe_state = {}
+        for k, v in bot_state.items():
+            if isinstance(v, set):
+                safe_state[k] = list(v)
+            else:
+                safe_state[k] = v
+        return jsonify(safe_state)
     
     @app.route("/api/config", methods=["POST"])
     def api_config():
@@ -204,7 +231,7 @@ def register_dashboard(app, bot_state, config_module=None):
         for key in ["image_style", "bg_theme", "bio_category", "show_weather", "show_progress", 
                      "afk_enabled", "afk_message", "countdown_date", "countdown_label",
                      "schedule_mode", "mood", "custom_bio", "custom_last_name",
-                     "update_interval", "bot_active"]:
+                     "update_interval", "bot_active", "pm_permit"]:
             if key in data:
                 bot_state[key] = data[key]
                 changed.append(key)
