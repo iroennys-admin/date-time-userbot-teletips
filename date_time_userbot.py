@@ -726,10 +726,15 @@ if __name__ == "__main__":
         # Ejecutar el bot
         await main_bot()
 
-    # CRITICAL FIX: Use asyncio.run() for proper event loop handling
-    # This ensures Pyrogram's update dispatcher works correctly
+    # CRITICAL FIX: Use explicit event loop creation (same as original)
+    # asyncio.run() creates a NEW loop that doesn't match Pyrogram's expectations
+    # for receiving incoming updates. The original approach works because
+    # Pyrogram stores the event loop at Client creation time and uses it
+    # for its internal update dispatcher.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        asyncio.run(run_all())
+        loop.run_until_complete(run_all())
     except KeyboardInterrupt:
         logger.info("Bot detenido por usuario")
     except Exception as e:
