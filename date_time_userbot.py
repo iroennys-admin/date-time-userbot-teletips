@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-DATE TIME USERBOT v3.2 - Maquina Potente
-FIX v3.2: Use async with userbot + asyncio.run() pattern.
-This ensures Pyrogram's update dispatcher runs on the SAME event loop
-as our background tasks, so incoming updates (messages) are properly
-dispatched to registered handlers.
+DATE TIME USERBOT v3.3 - Maquina Potente
+FIX v3.3: Use client.run() pattern to match Dispatcher's event loop.
 
-Previous versions used asyncio.ensure_future() + client.run() which
-could cause the update handler and main_bot() to run on different
-event loops, preventing incoming messages from reaching handlers.
+ROOT CAUSE FOUND: Pyrogram's Dispatcher captures asyncio.get_event_loop()
+during Client.__init__(). When asyncio.run() is used, it creates a NEW
+event loop, but the Dispatcher still references the old one. Handler
+workers are created on the old (non-running) loop, so they never execute
+and incoming updates are never dispatched.
+
+SOLUTION: Use client.run() which uses asyncio.get_event_loop() and
+loop.run_until_complete(), ensuring the SAME event loop that the
+Dispatcher captured is used throughout.
+
+All handlers MUST be registered BEFORE client.run() so they attach
+to the correct loop via add_handler()'s self.loop.create_task().
 """
 
 import os
@@ -74,7 +80,6 @@ bot_state = {
     "raw_update_count": 0,
     "msg_received_count": 0,
     "consecutive_photo_fails": 0,
-    "loop_running": False,
 }
 
 def log_startup(msg):
@@ -138,7 +143,7 @@ app = Flask(__name__)
 def health_check():
     return jsonify({
         "status": "alive",
-        "bot": "DateTimeUserbot v3.2",
+        "bot": "DateTimeUserbot v3.3",
         "connected": bot_state["connected"],
         "bot_active": bot_state["bot_active"],
         "last_update": bot_state["last_update"],
@@ -146,7 +151,6 @@ def health_check():
         "command_count": bot_state.get("command_count", 0),
         "raw_update_count": bot_state.get("raw_update_count", 0),
         "msg_received_count": bot_state.get("msg_received_count", 0),
-        "loop_running": bot_state.get("loop_running", False),
     })
 
 @app.route("/health")
@@ -178,12 +182,11 @@ def debug_info():
         "command_count": bot_state.get("command_count", 0),
         "raw_update_count": bot_state.get("raw_update_count", 0),
         "msg_received_count": bot_state.get("msg_received_count", 0),
-        "loop_running": bot_state.get("loop_running", False),
         "python_version": sys.version,
         "startup_log": bot_state["startup_log"],
     })
 
-log_startup("Flask app creada - v3.2")
+log_startup("Flask app creada - v3.3")
 
 # ─── Imports ───────────────────────────────────────────────────────
 pyrogram_ok = False
@@ -242,6 +245,9 @@ except Exception as e:
     log_startup(f"ERROR importando quotes: {e}")
 
 # ─── Cliente Pyrogram ─────────────────────────────────────────────
+# CRITICAL: Create Client at module level so that Dispatcher captures
+# the DEFAULT event loop. client.run() uses the same default loop,
+# ensuring all handler workers run on the correct loop.
 userbot = None
 if pyrogram_ok:
     try:
@@ -263,10 +269,37 @@ try:
 except Exception as e:
     log_startup(f"ERROR registrando dashboard: {e}")
 
-# ─── Nota: Los handlers se registran DENTRO del async with en main()
-# Registralos antes de start() puede causar que no se adjunten
-# correctamente al dispatcher de updates en Pyrogram v2.
-# Ver la funcion main() abajo.
+# ─── Registrar Handlers ANTES de client.run() ─────────────────────
+# CRITICAL: All handlers MUST be registered before client.run().
+# client.run() uses the same event loop as the Dispatcher, and
+# add_handler() creates tasks on that loop. If handlers are registered
+# after asyncio.run() creates a different loop, they won't work.
+if userbot:
+    # Diagnostic: raw update tracking
+    @userbot.on_raw_update()
+    async def raw_update_handler(client, update, users, chats):
+        bot_state["raw_update_count"] = bot_state.get("raw_update_count", 0) + 1
+
+    # Diagnostic: all messages tracking (group -100 = highest priority)
+    @userbot.on_message(group=-100)
+    async def diagnostic_all_msg(client, message):
+        bot_state["msg_received_count"] = bot_state.get("msg_received_count", 0) + 1
+        if bot_state["msg_received_count"] <= 10:
+            from_user = message.from_user
+            uid = from_user.id if from_user else "?"
+            txt = str(message.text)[:50] if message.text else "<media>"
+            log_startup(f"MSG #{bot_state['msg_received_count']}: uid={uid} txt={txt}")
+
+    # Register command handlers
+    try:
+        from commands import register_commands
+        register_commands(userbot, bot_state)
+        log_startup("Comandos registrados OK")
+    except Exception as e:
+        log_startup(f"ERROR registrando comandos: {e}")
+        logger.error(f"Error registrando comandos: {e}\n{traceback.format_exc()}")
+
+    log_startup("Todos los handlers registrados (antes de run)")
 
 # ─── Helper functions ──────────────────────────────────────────────
 async def send_notification(message: str):
@@ -331,17 +364,23 @@ def get_uptime_str() -> str:
     return f"{minutes}m"
 
 # ─── Bucle Principal del Bot (tarea de fondo) ─────────────────────
-async def update_loop():
+async def main_bot():
     """Bucle que actualiza el perfil periodicamente.
-    Se ejecuta como tarea de fondo dentro del mismo event loop
-    que maneja los updates de Pyrogram."""
+    Se ejecuta como tarea de fondo usando asyncio.ensure_future()
+    ANTES de client.run(). El task se ejecuta en el mismo event loop
+    que client.run() usa, gracias a que ambos usan el default loop."""
     if not userbot:
-        log_startup("No se puede iniciar update_loop: Pyrogram no disponible")
+        log_startup("No se puede iniciar bot: Pyrogram no disponible")
         return
 
-    # El cliente ya debe estar conectado cuando se llama esta funcion
+    # Esperar a que el cliente se conecte (client.run() llama start() despues)
+    for _ in range(60):
+        if userbot.is_connected:
+            break
+        await asyncio.sleep(1)
+    
     if not userbot.is_connected:
-        log_startup("ERROR en update_loop: Cliente no conectado")
+        log_startup("ERROR: Cliente no conectado despues de 60s")
         return
 
     me = await userbot.get_me()
@@ -349,7 +388,7 @@ async def update_loop():
     bot_state["profile_name"] = me.first_name
     bot_state["start_time"] = time_mod.time()
     bot_state["started"] = True
-    log_startup(f"Update loop iniciado - Conectado como: {me.first_name} (ID: {me.id})")
+    log_startup(f"Bot conectado como: {me.first_name} (ID: {me.id})")
 
     await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
 
@@ -414,18 +453,15 @@ async def update_loop():
                     uptime_str=uptime_str,
                 )
 
-            # Subir foto cada 10 min (no cada ciclo para evitar FloodWait)
+            # Subir foto cada 10 min
             current_time = time_mod.time()
             should_upload_photo = (
                 bot_state.get("last_photo_time", 0) == 0 or
                 (current_time - bot_state.get("last_photo_time", 0)) >= 600
             )
 
-            # No subir si hay muchos fallos consecutivos
             if bot_state.get("consecutive_photo_fails", 0) >= 3:
                 should_upload_photo = False
-
-            # No subir si estamos en FloodWait
             if current_time < bot_state.get("photo_flood_wait_until", 0):
                 should_upload_photo = False
             
@@ -511,101 +547,6 @@ async def update_loop():
             await asyncio.sleep(30)
 
 
-# ─── Main Async Function ──────────────────────────────────────────
-def register_handlers(client):
-    """Registra todos los handlers DESPUES de que el cliente este conectado.
-    En Pyrogram v2, los handlers deben registrarse cuando el cliente
-    ya esta conectado para que se adjunten correctamente al dispatcher."""
-    
-    # ─── Diagnostic Handlers ──────────────────────────────────────────
-    @client.on_raw_update()
-    async def raw_update_handler(c, update, users, chats):
-        """Track every raw update received from Telegram."""
-        bot_state["raw_update_count"] = bot_state.get("raw_update_count", 0) + 1
-
-    @client.on_message(group=-100)
-    async def diagnostic_all_msg(c, message):
-        """Track ALL messages received (diagnostic)."""
-        bot_state["msg_received_count"] = bot_state.get("msg_received_count", 0) + 1
-        if bot_state["msg_received_count"] <= 5:
-            log_startup(f"MSG recibido #{bot_state['msg_received_count']}: from={message.from_user.id if message.from_user else '?'} text={str(message.text)[:50] if message.text else '<media>'}")
-
-    log_startup("Diagnostic handlers registrados (post-connect)")
-
-    # ─── Comandos ──────────────────────────────────────────────────────
-    try:
-        from commands import register_commands
-        register_commands(client, bot_state)
-        log_startup("Comandos registrados OK (post-connect)")
-    except Exception as e:
-        log_startup(f"ERROR registrando comandos: {e}")
-        logger.error(f"Error registrando comandos: {e}\n{traceback.format_exc()}")
-
-
-async def main():
-    """Funcion principal que inicia el bot usando client.start()."""
-    if not userbot:
-        log_startup("FATAL: Pyrogram no disponible. Saliendo.")
-        return
-
-    log_startup("Iniciando con patron client.start() + idle")
-
-    try:
-        # Iniciar el cliente primero
-        await userbot.start()
-        bot_state["loop_running"] = True
-        log_startup("userbot.start() completado")
-
-        # Registrar handlers DESPUES de conectar
-        register_handlers(userbot)
-        log_startup("Handlers registrados post-conexion")
-
-        me = await userbot.get_me()
-        bot_state["connected"] = True
-        bot_state["profile_name"] = me.first_name
-        bot_state["start_time"] = time_mod.time()
-        bot_state["started"] = True
-        log_startup(f"Bot conectado como: {me.first_name} (ID: {me.id})")
-
-        # Enviar mensaje de prueba a Saved Messages para verificar updates
-        try:
-            test_msg = await userbot.send_message("me", "🔧 Bot v3.2 iniciado - verificando recepcion de updates...")
-            log_startup(f"Mensaje de prueba enviado (ID: {test_msg.id})")
-        except Exception as e:
-            log_startup(f"No se pudo enviar mensaje de prueba: {e}")
-
-        # Iniciar el bucle de actualizacion como tarea de fondo
-        update_task = asyncio.create_task(update_loop())
-        log_startup("Update loop creado como tarea de fondo")
-
-        # Usar Pyrogram's idle() para mantener el bot corriendo
-        # idle() espera senales (SIGINT/SIGTERM) y mantiene el event loop activo
-        # mientras Pyrogram procesa updates entrantes
-        from pyrogram import idle as pyrogram_idle
-        log_startup("Entrando en idle() - escuchando updates...")
-        await pyrogram_idle()
-        log_startup("Saliendo de idle()")
-
-    except AuthKeyUnregistered:
-        log_startup("ERROR: Session invalida (AuthKeyUnregistered). Genera un nuevo SESSION_STRING.")
-        bot_state["error"] = "Session invalida - AuthKeyUnregistered"
-    except SessionRevoked:
-        log_startup("ERROR: Session revocada (SessionRevoked). Genera un nuevo SESSION_STRING.")
-        bot_state["error"] = "Session revocada - SessionRevoked"
-    except Exception as e:
-        log_startup(f"ERROR FATAL en main(): {e}")
-        logger.error(f"Error en main(): {e}\n{traceback.format_exc()}")
-        bot_state["error"] = str(e)
-    finally:
-        try:
-            if userbot.is_connected:
-                await userbot.stop()
-                log_startup("Bot detenido limpiamente")
-        except Exception:
-            pass
-        bot_state["loop_running"] = False
-
-
 # ─── Keep-Alive ────────────────────────────────────────────────────
 def keep_alive():
     render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
@@ -626,7 +567,7 @@ def keep_alive():
 
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
-    log_startup("=== DateTime Userbot v3.2 iniciando ===")
+    log_startup("=== DateTime Userbot v3.3 iniciando ===")
     
     # Flask en thread separado
     flask_thread = threading.Thread(
@@ -642,17 +583,17 @@ if __name__ == "__main__":
         log_startup("FATAL: Pyrogram no disponible. Saliendo.")
         sys.exit(1)
 
-    # PATRON CORRECTO: asyncio.run() + async with userbot
-    # - asyncio.run() crea un event loop limpio
-    # - async with userbot garantiza que start() y stop() se llamen correctamente
-    # - asyncio.create_task() dentro del context manager asegura que todo
-    #   corra en el MISMO event loop (updates + bucle de perfil)
-    # - await stop_event.wait() mantiene el loop corriendo para procesar updates
-    log_startup("Llamando asyncio.run(main())...")
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        log_startup("Bot detenido por KeyboardInterrupt")
-    except Exception as e:
-        log_startup(f"ERROR CRITICO: {e}")
-        logger.error(f"Error critico: {e}\n{traceback.format_exc()}")
+    # PATRON CORRECTO v3.3:
+    # 1. asyncio.ensure_future(main_bot()) - Agenda tarea en el loop por defecto
+    # 2. client.run() - Usa el MISMO loop por defecto (asyncio.get_event_loop())
+    #    Esto asegura que Dispatcher.handler_workers y main_bot() corran en
+    #    el mismo event loop, permitiendo que los updates se despachen correctamente.
+    #
+    # client.run() internamente hace:
+    #   loop = asyncio.get_event_loop()  # Mismo loop que Dispatcher capturo
+    #   loop.run_until_complete(self.start())  # Inicia cliente + dispatcher workers
+    #   loop.run_until_complete(idle())  # Mantiene el loop corriendo
+    #   loop.run_until_complete(self.stop())  # Detiene cliente
+    log_startup("Iniciando con patron ensure_future + client.run()")
+    asyncio.ensure_future(main_bot())
+    userbot.run()
