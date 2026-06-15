@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-DATE TIME USERBOT v3.0 - Maquina Potente
-Flask arranca PRIMERO, Pyrogram despues.
-Fix: Bucle de reconexion, Python 3.11, nuevos comandos poderosos.
+DATE TIME USERBOT v3.1 - Maquina Potente
+FIX: Pyrogram update handling, command registration, event loop.
 """
 
 import os
@@ -64,6 +63,7 @@ bot_state = {
     "pm_permit": False,
     "approved_users": set(),
     "sed_count": 0,
+    "command_count": 0,
 }
 
 def log_startup(msg):
@@ -79,7 +79,7 @@ app = Flask(__name__)
 def health_check():
     return jsonify({
         "status": "alive",
-        "bot": "DateTimeUserbot v3.0",
+        "bot": "DateTimeUserbot v3.1",
         "connected": bot_state["connected"],
         "bot_active": bot_state["bot_active"],
         "last_update": bot_state["last_update"],
@@ -87,6 +87,7 @@ def health_check():
         "style": bot_state["image_style"],
         "theme": bot_state.get("bg_theme", "auto"),
         "mood": bot_state.get("mood", "none"),
+        "command_count": bot_state.get("command_count", 0),
     })
 
 @app.route("/health")
@@ -115,11 +116,12 @@ def debug_info():
         "update_interval": bot_state.get("update_interval", 60),
         "notes_count": len(bot_state.get("notes", {})),
         "reminders_count": len(bot_state.get("reminders", [])),
+        "command_count": bot_state.get("command_count", 0),
         "python_version": sys.version,
         "startup_log": bot_state["startup_log"],
     })
 
-log_startup("Flask app creada - v3.0")
+log_startup("Flask app creada - v3.1")
 
 # ─── Cargar configuracion ────────────────────────────────────────
 try:
@@ -144,21 +146,21 @@ try:
     bot_state["update_interval"] = UPDATE_INTERVAL
 except Exception as e:
     log_startup(f"ERROR cargando config: {e}")
-    API_ID = 14681595
-    API_HASH = "a86730aab5c59953c424abb4396d32d5"
+    API_ID = int(os.environ.get("API_ID", "14681595"))
+    API_HASH = os.environ.get("API_HASH", "a86730aab5c59953c424abb4396d32d5")
     SESSION_STRING = os.environ.get("SESSION_STRING", "")
-    TIME_ZONE = "America/Havana"
-    UPDATE_INTERVAL = 60
-    MAX_RETRIES = 5
+    TIME_ZONE = os.environ.get("TIME_ZONE", "America/Havana")
+    UPDATE_INTERVAL = int(os.environ.get("UPDATE_INTERVAL", "60"))
+    MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "5"))
     PORT = int(os.environ.get("PORT", 10000))
-    EXTRA_TIMEZONES = ""
-    FONT_PATH = "ds-digit.ttf"
-    BASE_IMAGE = "image.jpg"
-    IMAGE_STYLE = "auto"
-    BIO_CUSTOM_PREFIX = ""
+    EXTRA_TIMEZONES = os.environ.get("EXTRA_TIMEZONES", "")
+    FONT_PATH = os.environ.get("FONT_PATH", "ds-digit.ttf")
+    BASE_IMAGE = os.environ.get("BASE_IMAGE", "image.jpg")
+    IMAGE_STYLE = os.environ.get("IMAGE_STYLE", "auto")
+    BIO_CUSTOM_PREFIX = os.environ.get("BIO_CUSTOM_PREFIX", "")
     BIO_SHOW_COUNTER = True
     BIO_SCHEDULE_MODE = True
-    WEATHER_CITY = "Havana"
+    WEATHER_CITY = os.environ.get("WEATHER_CITY", "Havana")
     WEATHER_SHOW = True
     COUNTDOWN_DATE = ""
     COUNTDOWN_LABEL = ""
@@ -168,11 +170,6 @@ except Exception as e:
     SHOW_DAY_PROGRESS = True
     DYNAMIC_HOUR_EMOJI = True
     MONITOR_TIMEOUT = 300
-
-# ─── Event loop ANTES de importar Pyrogram ───────────────────────
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-log_startup("Event loop creado")
 
 # ─── Imports pesados (con manejo de errores) ─────────────────────
 pyrogram_ok = False
@@ -341,11 +338,11 @@ async def main_bot():
     retry_count = 0
     base_delay = 5
     last_success_time = 0
-    monitor_enabled = False  # Solo activar despues del primer update exitoso
+    monitor_enabled = False
     consecutive_failures = 0
 
     bot_state["started"] = True
-    log_startup("Iniciando bucle principal v3.0...")
+    log_startup("Iniciando bucle principal v3.1...")
 
     # Conectar
     try:
@@ -354,8 +351,9 @@ async def main_bot():
         bot_state["connected"] = True
         bot_state["profile_name"] = me.first_name
         bot_state["start_time"] = time_mod.time()
-        last_success_time = time_mod.time()  # FIX: Inicializar tras conexion
+        last_success_time = time_mod.time()
         log_startup(f"Conectado como: {me.first_name} (ID: {me.id})")
+        log_startup(f"Handlers registrados: {len(userbot.dispatcher.groups)}")
         await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
     except (AuthKeyUnregistered, SessionRevoked) as e:
         log_startup(f"Sesion invalida: {e}")
@@ -419,14 +417,14 @@ async def main_bot():
                     bot_state["connected"] = False
                     continue
 
-            # Monitoreo proactivo (solo si ya hubo al menos 1 update exitoso)
+            # Monitoreo proactivo
             if monitor_enabled and last_success_time > 0:
                 current_time = time_mod.time()
                 time_since_last = current_time - last_success_time
                 if time_since_last > MONITOR_TIMEOUT:
                     log_startup(f"No se actualizo en {int(time_since_last)}s. Forzando reconexion...")
                     bot_state["connected"] = False
-                    monitor_enabled = False  # Desactivar monitor hasta reconectar
+                    monitor_enabled = False
                     continue
 
             # Procesar recordatorios
@@ -576,7 +574,7 @@ async def main_bot():
                 bot_state["update_count"] += 1
                 last_success_time = time_mod.time()
                 consecutive_failures = 0
-                monitor_enabled = True  # Activar monitor tras primer update
+                monitor_enabled = True
                 if bot_state["update_count"] % 10 == 0:
                     log_startup(f"Perfil actualizado #{bot_state['update_count']}: {day_name} {time_str}")
             except FloodWait as e:
@@ -652,11 +650,10 @@ def keep_alive():
 
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
-    log_startup("=== DateTime Userbot v3.0 iniciando ===")
+    log_startup("=== DateTime Userbot v3.1 iniciando ===")
     
     async def run_all():
-        bot_task = asyncio.ensure_future(main_bot())
-        
+        # Iniciar Flask en thread separado
         flask_thread = threading.Thread(
             target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False),
             daemon=True
@@ -666,6 +663,15 @@ if __name__ == "__main__":
         
         keep_alive()
         
-        await bot_task
+        # Ejecutar el bot
+        await main_bot()
 
-    loop.run_until_complete(run_all())
+    # CRITICAL FIX: Use asyncio.run() for proper event loop handling
+    # This ensures Pyrogram's update dispatcher works correctly
+    try:
+        asyncio.run(run_all())
+    except KeyboardInterrupt:
+        logger.info("Bot detenido por usuario")
+    except Exception as e:
+        logger.critical(f"Error fatal: {e}")
+        logger.debug(traceback.format_exc())

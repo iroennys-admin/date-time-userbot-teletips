@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Comandos de Telegram para el DateTime Userbot v3.0 - Maquina Potente"""
+"""Comandos de Telegram para el DateTime Userbot v3.1 - Maquina Potente"""
 
 from pyrogram import Client, filters
 import datetime
@@ -7,10 +7,13 @@ import time as time_mod
 import asyncio
 import re
 import json
+import sys
+import logging
 import urllib.request
 
-CMD_PREFIXES = [".", "/", "!"]
+logger = logging.getLogger("DateTimeUserbot")
 
+CMD_PREFIXES = ".!/"
 
 def register_commands(app: Client, bot_state: dict):
     """Registra todos los comandos del bot."""
@@ -22,15 +25,23 @@ def register_commands(app: Client, bot_state: dict):
     @app.on_message(filters.command("on", prefixes=CMD_PREFIXES) & filters.me)
     async def bot_on(client, message):
         """Activa el bot para que actualice el perfil."""
-        bot_state["bot_active"] = True
-        bot_state["start_time"] = time_mod.time()
-        await message.edit("✅ **Bot ACTIVADO** - Actualizando perfil")
+        try:
+            bot_state["bot_active"] = True
+            bot_state["start_time"] = time_mod.time()
+            await message.edit("✅ **Bot ACTIVADO** - Actualizando perfil")
+            logger.info("Comando .on ejecutado")
+        except Exception as e:
+            logger.error(f"Error en .on: {e}")
 
     @app.on_message(filters.command("off", prefixes=CMD_PREFIXES) & filters.me)
     async def bot_off(client, message):
         """Desactiva el bot, deja de actualizar el perfil."""
-        bot_state["bot_active"] = False
-        await message.edit("⏸️ **Bot PAUSADO** - Perfil congelado. Usa `.on` para reanudar")
+        try:
+            bot_state["bot_active"] = False
+            await message.edit("⏸️ **Bot PAUSADO** - Perfil congelado. Usa `.on` para reanudar")
+            logger.info("Comando .off ejecutado")
+        except Exception as e:
+            logger.error(f"Error en .off: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # ESTILOS DE IMAGEN
@@ -38,21 +49,26 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("style", prefixes=CMD_PREFIXES) & filters.me)
     async def style_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            styles = "auto, neon, retro, minimal, gradient"
-            await message.edit(f"📋 Estilos: {styles}\nUso: `.style neon`")
-            return
-        
-        new_style = args[1].strip().lower()
-        valid = ["auto", "neon", "retro", "minimal", "gradient"]
-        if new_style not in valid:
-            await message.edit(f"❌ Estilo invalido. Opciones: {', '.join(valid)}")
-            return
-        
-        bot_state["image_style"] = new_style
-        bot_state["bg_theme"] = ""
-        await message.edit(f"✅ Estilo cambiado a: **{new_style}**")
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                styles = "auto, neon, retro, minimal, gradient"
+                await message.edit(f"📋 Estilos: {styles}\nUso: `.style neon`")
+                return
+            
+            new_style = args[1].strip().lower()
+            valid = ["auto", "neon", "retro", "minimal", "gradient"]
+            if new_style not in valid:
+                await message.edit(f"❌ Estilo invalido. Opciones: {', '.join(valid)}")
+                return
+            
+            bot_state["image_style"] = new_style
+            bot_state["bg_theme"] = ""
+            await message.edit(f"✅ Estilo cambiado a: **{new_style}**")
+        except Exception as e:
+            logger.error(f"Error en .style: {e}")
+            try: await message.edit(f"❌ Error: {e}")
+            except: pass
 
     # ═══════════════════════════════════════════════════════════════
     # TEMAS DE FONDO
@@ -61,44 +77,52 @@ def register_commands(app: Client, bot_state: dict):
     @app.on_message(filters.command("theme", prefixes=CMD_PREFIXES) & filters.me)
     async def theme_command(client, message):
         """Cambia el tema de fondo de la imagen."""
-        from image_generator import BACKGROUND_THEMES
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            themes_list = "\n".join(
-                f"  {v['emoji']} `{k}` - {v['name']}" 
-                for k, v in BACKGROUND_THEMES.items()
-            )
-            current = bot_state.get("bg_theme", "auto")
-            await message.edit(
-                f"🎨 **Temas disponibles:**\n{themes_list}\n\n"
-                f"Uso: `.theme anime`\n"
-                f"Quitar tema: `.theme off`\n"
-                f"Tema actual: **{current or 'auto'}**"
-            )
-            return
-        
-        new_theme = args[1].strip().lower()
-        if new_theme in ("off", "auto", "none", "clear"):
-            bot_state["bg_theme"] = ""
-            await message.edit("🎨 Tema eliminado. Usando estilo normal.")
-            return
-        
-        if new_theme not in BACKGROUND_THEMES:
-            await message.edit(f"❌ Tema invalido. Usa `.theme` para ver la lista.")
-            return
-        
-        bot_state["bg_theme"] = new_theme
-        td = BACKGROUND_THEMES[new_theme]
-        await message.edit(f"✅ Tema cambiado a: {td['emoji']} **{td['name']}**")
+        try:
+            from image_generator import BACKGROUND_THEMES
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                themes_list = "\n".join(
+                    f"  {v['emoji']} `{k}` - {v['name']}" 
+                    for k, v in BACKGROUND_THEMES.items()
+                )
+                current = bot_state.get("bg_theme", "auto")
+                await message.edit(
+                    f"🎨 **Temas disponibles:**\n{themes_list}\n\n"
+                    f"Uso: `.theme anime`\n"
+                    f"Quitar tema: `.theme off`\n"
+                    f"Tema actual: **{current or 'auto'}**"
+                )
+                return
+            
+            new_theme = args[1].strip().lower()
+            if new_theme in ("off", "auto", "none", "clear"):
+                bot_state["bg_theme"] = ""
+                await message.edit("🎨 Tema eliminado. Usando estilo normal.")
+                return
+            
+            if new_theme not in BACKGROUND_THEMES:
+                await message.edit(f"❌ Tema invalido. Usa `.theme` para ver la lista.")
+                return
+            
+            bot_state["bg_theme"] = new_theme
+            td = BACKGROUND_THEMES[new_theme]
+            await message.edit(f"✅ Tema cambiado a: {td['emoji']} **{td['name']}**")
+        except Exception as e:
+            logger.error(f"Error en .theme: {e}")
+            try: await message.edit(f"❌ Error: {e}")
+            except: pass
 
     @app.on_message(filters.command("themes", prefixes=CMD_PREFIXES) & filters.me)
     async def themes_list_command(client, message):
-        from image_generator import BACKGROUND_THEMES
-        themes_list = "\n".join(
-            f"{v['emoji']} `{k}` - {v['name']}" 
-            for k, v in BACKGROUND_THEMES.items()
-        )
-        await message.edit(f"🎨 **Temas de fondo:**\n\n{themes_list}\n\nUsa `.theme anime` para activar")
+        try:
+            from image_generator import BACKGROUND_THEMES
+            themes_list = "\n".join(
+                f"{v['emoji']} `{k}` - {v['name']}" 
+                for k, v in BACKGROUND_THEMES.items()
+            )
+            await message.edit(f"🎨 **Temas de fondo:**\n\n{themes_list}\n\nUsa `.theme anime` para activar")
+        except Exception as e:
+            logger.error(f"Error en .themes: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # FRASES / BIO
@@ -106,26 +130,29 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("quote", prefixes=CMD_PREFIXES) & filters.me)
     async def quote_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            cats = "random, motivation, humor, philosophy, love, tech, life, schedule"
-            await message.edit(f"📋 Categorias: {cats}\nUso: `.quote humor`")
-            return
-        
-        new_cat = args[1].strip().lower()
-        valid = ["random", "motivation", "humor", "philosophy", "love", "tech", "life", "schedule"]
-        if new_cat not in valid:
-            await message.edit(f"❌ Categoria invalida. Opciones: {', '.join(valid)}")
-            return
-        
-        if new_cat == "schedule":
-            bot_state["schedule_mode"] = True
-            bot_state["bio_category"] = "random"
-        else:
-            bot_state["schedule_mode"] = False
-            bot_state["bio_category"] = new_cat
-        
-        await message.edit(f"✅ Categoria de frases: **{new_cat}**")
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                cats = "random, motivation, humor, philosophy, love, tech, life, schedule"
+                await message.edit(f"📋 Categorias: {cats}\nUso: `.quote humor`")
+                return
+            
+            new_cat = args[1].strip().lower()
+            valid = ["random", "motivation", "humor", "philosophy", "love", "tech", "life", "schedule"]
+            if new_cat not in valid:
+                await message.edit(f"❌ Categoria invalida. Opciones: {', '.join(valid)}")
+                return
+            
+            if new_cat == "schedule":
+                bot_state["schedule_mode"] = True
+                bot_state["bio_category"] = "random"
+            else:
+                bot_state["schedule_mode"] = False
+                bot_state["bio_category"] = new_cat
+            
+            await message.edit(f"✅ Categoria de frases: **{new_cat}**")
+        except Exception as e:
+            logger.error(f"Error en .quote: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # CLIMA / PROGRESO / COUNTDOWN
@@ -133,41 +160,50 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("weather", prefixes=CMD_PREFIXES) & filters.me)
     async def weather_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            status = "✅ ON" if bot_state.get("show_weather", True) else "❌ OFF"
-            await message.edit(f"🌤 Clima: {status}\nUso: `.weather on` o `.weather off`")
-            return
-        val = args[1].strip().lower()
-        bot_state["show_weather"] = val in ("on", "yes", "true", "1", "si")
-        await message.edit(f"🌤 Clima {'✅ activado' if bot_state['show_weather'] else '❌ desactivado'}")
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                status = "✅ ON" if bot_state.get("show_weather", True) else "❌ OFF"
+                await message.edit(f"🌤 Clima: {status}\nUso: `.weather on` o `.weather off`")
+                return
+            val = args[1].strip().lower()
+            bot_state["show_weather"] = val in ("on", "yes", "true", "1", "si")
+            await message.edit(f"🌤 Clima {'✅ activado' if bot_state['show_weather'] else '❌ desactivado'}")
+        except Exception as e:
+            logger.error(f"Error en .weather: {e}")
 
     @app.on_message(filters.command("progress", prefixes=CMD_PREFIXES) & filters.me)
     async def progress_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            status = "✅ ON" if bot_state.get("show_progress", True) else "❌ OFF"
-            await message.edit(f"📊 Progreso: {status}\nUso: `.progress on` o `.progress off`")
-            return
-        val = args[1].strip().lower()
-        bot_state["show_progress"] = val in ("on", "yes", "true", "1", "si")
-        await message.edit(f"📊 Progreso {'✅ activado' if bot_state['show_progress'] else '❌ desactivado'}")
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                status = "✅ ON" if bot_state.get("show_progress", True) else "❌ OFF"
+                await message.edit(f"📊 Progreso: {status}\nUso: `.progress on` o `.progress off`")
+                return
+            val = args[1].strip().lower()
+            bot_state["show_progress"] = val in ("on", "yes", "true", "1", "si")
+            await message.edit(f"📊 Progreso {'✅ activado' if bot_state['show_progress'] else '❌ desactivado'}")
+        except Exception as e:
+            logger.error(f"Error en .progress: {e}")
 
     @app.on_message(filters.command("countdown", prefixes=CMD_PREFIXES) & filters.me)
     async def countdown_command(client, message):
-        args = message.text.split(maxsplit=2)
-        if len(args) < 2:
-            current = bot_state.get("countdown_date", "") or "No configurado"
-            await message.edit(f"📅 Countdown: {current}\nUso: `.countdown 2027-01-01 Mi evento`")
-            return
-        if args[1].lower() in ("off", "clear", "remove"):
-            bot_state["countdown_date"] = ""
-            bot_state["countdown_label"] = ""
-            await message.edit("📅 Countdown eliminado")
-            return
-        bot_state["countdown_date"] = args[1]
-        bot_state["countdown_label"] = args[2] if len(args) > 2 else ""
-        await message.edit(f"📅 Countdown: **{args[1]}** - {bot_state['countdown_label']}")
+        try:
+            args = message.text.split(maxsplit=2)
+            if len(args) < 2:
+                current = bot_state.get("countdown_date", "") or "No configurado"
+                await message.edit(f"📅 Countdown: {current}\nUso: `.countdown 2027-01-01 Mi evento`")
+                return
+            if args[1].lower() in ("off", "clear", "remove"):
+                bot_state["countdown_date"] = ""
+                bot_state["countdown_label"] = ""
+                await message.edit("📅 Countdown eliminado")
+                return
+            bot_state["countdown_date"] = args[1]
+            bot_state["countdown_label"] = args[2] if len(args) > 2 else ""
+            await message.edit(f"📅 Countdown: **{args[1]}** - {bot_state['countdown_label']}")
+        except Exception as e:
+            logger.error(f"Error en .countdown: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # MOOD (ESTADO DE ANIMO)
@@ -190,33 +226,36 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("mood", prefixes=CMD_PREFIXES) & filters.me)
     async def mood_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            moods_list = "\n".join(f"  {v['emoji']} `{k}` - {v['name']}" for k, v in MOODS.items())
-            current = bot_state.get("mood", "none")
-            await message.edit(
-                f"🎭 **Moods disponibles:**\n{moods_list}\n\n"
-                f"Uso: `.mood happy`\nQuitar: `.mood off`\nActual: **{current}**"
-            )
-            return
-        
-        new_mood = args[1].strip().lower()
-        if new_mood in ("off", "clear", "none"):
-            bot_state["mood"] = ""
-            bot_state["mood_emoji"] = ""
-            bot_state["mood_bio"] = ""
-            await message.edit("🎭 Mood eliminado")
-            return
-        
-        if new_mood not in MOODS:
-            await message.edit(f"❌ Mood invalido. Usa `.mood` para ver la lista.")
-            return
-        
-        m = MOODS[new_mood]
-        bot_state["mood"] = new_mood
-        bot_state["mood_emoji"] = m["emoji"]
-        bot_state["mood_bio"] = m["bio"]
-        await message.edit(f"🎭 Mood: {m['emoji']} **{m['name']}**")
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                moods_list = "\n".join(f"  {v['emoji']} `{k}` - {v['name']}" for k, v in MOODS.items())
+                current = bot_state.get("mood", "none")
+                await message.edit(
+                    f"🎭 **Moods disponibles:**\n{moods_list}\n\n"
+                    f"Uso: `.mood happy`\nQuitar: `.mood off`\nActual: **{current}**"
+                )
+                return
+            
+            new_mood = args[1].strip().lower()
+            if new_mood in ("off", "clear", "none"):
+                bot_state["mood"] = ""
+                bot_state["mood_emoji"] = ""
+                bot_state["mood_bio"] = ""
+                await message.edit("🎭 Mood eliminado")
+                return
+            
+            if new_mood not in MOODS:
+                await message.edit(f"❌ Mood invalido. Usa `.mood` para ver la lista.")
+                return
+            
+            m = MOODS[new_mood]
+            bot_state["mood"] = new_mood
+            bot_state["mood_emoji"] = m["emoji"]
+            bot_state["mood_bio"] = m["bio"]
+            await message.edit(f"🎭 Mood: {m['emoji']} **{m['name']}**")
+        except Exception as e:
+            logger.error(f"Error en .mood: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # AFK
@@ -224,30 +263,33 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("afk", prefixes=CMD_PREFIXES) & filters.me)
     async def afk_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            status = "✅ ON" if bot_state.get("afk_enabled", False) else "❌ OFF"
-            afk_since = bot_state.get("afk_since", "")
-            await message.edit(f"📴 AFK: {status}\nUso: `.afk on`, `.afk off`, `.afk Estoy ocupado`")
-            return
-        
-        val = args[1].strip().lower()
-        if val in ("on", "yes", "true", "1", "si"):
-            bot_state["afk_enabled"] = True
-            bot_state["afk_since"] = datetime.datetime.now().strftime("%H:%M")
-            bot_state["afk_replied"] = set()
-            await message.edit("📴 Modo AFK **activado**")
-        elif val in ("off", "no", "false", "0"):
-            bot_state["afk_enabled"] = False
-            afk_count = len(bot_state.get("afk_replied", set()))
-            bot_state["afk_replied"] = set()
-            await message.edit(f"📴 Modo AFK **desactivado** ({afk_count} personas te escribieron)")
-        else:
-            bot_state["afk_enabled"] = True
-            bot_state["afk_message"] = args[1]
-            bot_state["afk_since"] = datetime.datetime.now().strftime("%H:%M")
-            bot_state["afk_replied"] = set()
-            await message.edit(f"📴 AFK **activado**: {args[1]}")
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                status = "✅ ON" if bot_state.get("afk_enabled", False) else "❌ OFF"
+                afk_since = bot_state.get("afk_since", "")
+                await message.edit(f"📴 AFK: {status}\nUso: `.afk on`, `.afk off`, `.afk Estoy ocupado`")
+                return
+            
+            val = args[1].strip().lower()
+            if val in ("on", "yes", "true", "1", "si"):
+                bot_state["afk_enabled"] = True
+                bot_state["afk_since"] = datetime.datetime.now().strftime("%H:%M")
+                bot_state["afk_replied"] = set()
+                await message.edit("📴 Modo AFK **activado**")
+            elif val in ("off", "no", "false", "0"):
+                bot_state["afk_enabled"] = False
+                afk_count = len(bot_state.get("afk_replied", set()))
+                bot_state["afk_replied"] = set()
+                await message.edit(f"📴 Modo AFK **desactivado** ({afk_count} personas te escribieron)")
+            else:
+                bot_state["afk_enabled"] = True
+                bot_state["afk_message"] = args[1]
+                bot_state["afk_since"] = datetime.datetime.now().strftime("%H:%M")
+                bot_state["afk_replied"] = set()
+                await message.edit(f"📴 AFK **activado**: {args[1]}")
+        except Exception as e:
+            logger.error(f"Error en .afk: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # NOTAS (SAVE/RECALL)
@@ -255,60 +297,63 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("note", prefixes=CMD_PREFIXES) & filters.me)
     async def note_command(client, message):
-        args = message.text.split(maxsplit=2)
-        
-        if len(args) < 2:
-            await message.edit(
-                "📝 **Notas**\n\n"
-                "`.note save <nombre> <texto>` - Guardar nota\n"
-                "`.note get <nombre>` - Leer nota\n"
-                "`.note list` - Ver todas\n"
-                "`.note del <nombre>` - Eliminar nota"
-            )
-            return
-        
-        action = args[1].strip().lower()
-        notes = bot_state.setdefault("notes", {})
-        
-        if action == "save" and len(args) >= 3:
-            parts = args[2].split(maxsplit=1)
-            if len(parts) < 2:
-                await message.edit("❌ Uso: `.note save <nombre> <texto>`")
+        try:
+            args = message.text.split(maxsplit=2)
+            
+            if len(args) < 2:
+                await message.edit(
+                    "📝 **Notas**\n\n"
+                    "`.note save <nombre> <texto>` - Guardar nota\n"
+                    "`.note get <nombre>` - Leer nota\n"
+                    "`.note list` - Ver todas\n"
+                    "`.note del <nombre>` - Eliminar nota"
+                )
                 return
-            name, text = parts[0].lower(), parts[1]
-            notes[name] = text
-            await message.edit(f"📝 Nota **{name}** guardada")
-        
-        elif action == "get":
-            if len(args) < 3:
-                await message.edit("❌ Uso: `.note get <nombre>`")
-                return
-            name = args[2].strip().lower()
-            if name in notes:
-                await message.edit(f"📝 **{name}:** {notes[name]}")
+            
+            action = args[1].strip().lower()
+            notes = bot_state.setdefault("notes", {})
+            
+            if action == "save" and len(args) >= 3:
+                parts = args[2].split(maxsplit=1)
+                if len(parts) < 2:
+                    await message.edit("❌ Uso: `.note save <nombre> <texto>`")
+                    return
+                name, text = parts[0].lower(), parts[1]
+                notes[name] = text
+                await message.edit(f"📝 Nota **{name}** guardada")
+            
+            elif action == "get":
+                if len(args) < 3:
+                    await message.edit("❌ Uso: `.note get <nombre>`")
+                    return
+                name = args[2].strip().lower()
+                if name in notes:
+                    await message.edit(f"📝 **{name}:** {notes[name]}")
+                else:
+                    await message.edit(f"❌ Nota `{name}` no encontrada")
+            
+            elif action == "list":
+                if not notes:
+                    await message.edit("📝 No hay notas guardadas")
+                    return
+                notes_list = "\n".join(f"  📌 `{name}` - {text[:40]}..." for name, text in notes.items())
+                await message.edit(f"📝 **Notas guardadas:**\n{notes_list}")
+            
+            elif action in ("del", "delete", "rm"):
+                if len(args) < 3:
+                    await message.edit("❌ Uso: `.note del <nombre>`")
+                    return
+                name = args[2].strip().lower()
+                if name in notes:
+                    del notes[name]
+                    await message.edit(f"🗑 Nota **{name}** eliminada")
+                else:
+                    await message.edit(f"❌ Nota `{name}` no encontrada")
+            
             else:
-                await message.edit(f"❌ Nota `{name}` no encontrada")
-        
-        elif action == "list":
-            if not notes:
-                await message.edit("📝 No hay notas guardadas")
-                return
-            notes_list = "\n".join(f"  📌 `{name}` - {text[:40]}..." for name, text in notes.items())
-            await message.edit(f"📝 **Notas guardadas:**\n{notes_list}")
-        
-        elif action in ("del", "delete", "rm"):
-            if len(args) < 3:
-                await message.edit("❌ Uso: `.note del <nombre>`")
-                return
-            name = args[2].strip().lower()
-            if name in notes:
-                del notes[name]
-                await message.edit(f"🗑 Nota **{name}** eliminada")
-            else:
-                await message.edit(f"❌ Nota `{name}` no encontrada")
-        
-        else:
-            await message.edit("❌ Accion invalida. Usa save, get, list o del")
+                await message.edit("❌ Accion invalida. Usa save, get, list o del")
+        except Exception as e:
+            logger.error(f"Error en .note: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # BIO / NOMBRE PERSONALIZADO
@@ -316,35 +361,41 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("bio", prefixes=CMD_PREFIXES) & filters.me)
     async def bio_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            current = bot_state.get("custom_bio", "")
-            await message.edit(f"💬 Bio personalizada: {current or 'Ninguna'}\nUso: `.bio Mi texto aqui`\nQuitar: `.bio off`")
-            return
-        
-        text = args[1].strip()
-        if text.lower() in ("off", "clear", "none"):
-            bot_state["custom_bio"] = ""
-            await message.edit("💬 Bio personalizada eliminada (usando frase automatica)")
-        else:
-            bot_state["custom_bio"] = text
-            await message.edit(f"💬 Bio personalizada: **{text}**")
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                current = bot_state.get("custom_bio", "")
+                await message.edit(f"💬 Bio personalizada: {current or 'Ninguna'}\nUso: `.bio Mi texto aqui`\nQuitar: `.bio off`")
+                return
+            
+            text = args[1].strip()
+            if text.lower() in ("off", "clear", "none"):
+                bot_state["custom_bio"] = ""
+                await message.edit("💬 Bio personalizada eliminada (usando frase automatica)")
+            else:
+                bot_state["custom_bio"] = text
+                await message.edit(f"💬 Bio personalizada: **{text}**")
+        except Exception as e:
+            logger.error(f"Error en .bio: {e}")
 
     @app.on_message(filters.command("name", prefixes=CMD_PREFIXES) & filters.me)
     async def name_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            current = bot_state.get("custom_last_name", "")
-            await message.edit(f"👤 Apellido personalizado: {current or 'Automatico (hora)'}\nUso: `.name Mi apellido`\nQuitar: `.name off`")
-            return
-        
-        text = args[1].strip()
-        if text.lower() in ("off", "clear", "auto", "none"):
-            bot_state["custom_last_name"] = ""
-            await message.edit("👤 Apellido automatico (hora/fecha)")
-        else:
-            bot_state["custom_last_name"] = text
-            await message.edit(f"👤 Apellido: **{text}**")
+        try:
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                current = bot_state.get("custom_last_name", "")
+                await message.edit(f"👤 Apellido personalizado: {current or 'Automatico (hora)'}\nUso: `.name Mi apellido`\nQuitar: `.name off`")
+                return
+            
+            text = args[1].strip()
+            if text.lower() in ("off", "clear", "auto", "none"):
+                bot_state["custom_last_name"] = ""
+                await message.edit("👤 Apellido automatico (hora/fecha)")
+            else:
+                bot_state["custom_last_name"] = text
+                await message.edit(f"👤 Apellido: **{text}**")
+        except Exception as e:
+            logger.error(f"Error en .name: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # INTERVALO DE ACTUALIZACION
@@ -352,19 +403,22 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("interval", prefixes=CMD_PREFIXES) & filters.me)
     async def interval_command(client, message):
-        args = message.text.split(maxsplit=1)
-        if len(args) < 2:
-            current = bot_state.get("update_interval", 60)
-            await message.edit(f"⏱️ Intervalo actual: **{current}s**\nUso: `.interval 120` (min 30s, max 600s)")
-            return
-        
         try:
-            val = int(args[1].strip())
-            val = max(30, min(600, val))
-            bot_state["update_interval"] = val
-            await message.edit(f"⏱️ Intervalo cambiado a: **{val}s**")
-        except ValueError:
-            await message.edit("❌ Ingresa un numero valido. Ej: `.interval 120`")
+            args = message.text.split(maxsplit=1)
+            if len(args) < 2:
+                current = bot_state.get("update_interval", 60)
+                await message.edit(f"⏱️ Intervalo actual: **{current}s**\nUso: `.interval 120` (min 30s, max 600s)")
+                return
+            
+            try:
+                val = int(args[1].strip())
+                val = max(30, min(600, val))
+                bot_state["update_interval"] = val
+                await message.edit(f"⏱️ Intervalo cambiado a: **{val}s**")
+            except ValueError:
+                await message.edit("❌ Ingresa un numero valido. Ej: `.interval 120`")
+        except Exception as e:
+            logger.error(f"Error en .interval: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # PING / UPTIME
@@ -372,27 +426,30 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("ping", prefixes=CMD_PREFIXES) & filters.me)
     async def ping_command(client, message):
-        start = time_mod.time()
-        await message.edit("🏓 Pong!")
-        end = time_mod.time()
-        latency = round((end - start) * 1000)
-        
-        start_time = bot_state.get("start_time", time_mod.time())
-        uptime_s = int(time_mod.time() - start_time)
-        hours = uptime_s // 3600
-        minutes = (uptime_s % 3600) // 60
-        seconds = uptime_s % 60
-        uptime_str = f"{hours}h {minutes}m {seconds}s"
-        
-        await message.edit(
-            f"🏓 **Pong!**\n\n"
-            f"⚡ Latencia: **{latency}ms**\n"
-            f"⏱️ Uptime: **{uptime_str}**\n"
-            f"🔄 Updates: **{bot_state.get('update_count', 0)}**"
-        )
+        try:
+            start = time_mod.time()
+            await message.edit("🏓 Pong!")
+            end = time_mod.time()
+            latency = round((end - start) * 1000)
+            
+            start_time = bot_state.get("start_time", time_mod.time())
+            uptime_s = int(time_mod.time() - start_time)
+            hours = uptime_s // 3600
+            minutes = (uptime_s % 3600) // 60
+            seconds = uptime_s % 60
+            uptime_str = f"{hours}h {minutes}m {seconds}s"
+            
+            await message.edit(
+                f"🏓 **Pong!**\n\n"
+                f"⚡ Latencia: **{latency}ms**\n"
+                f"⏱️ Uptime: **{uptime_str}**\n"
+                f"🔄 Updates: **{bot_state.get('update_count', 0)}**"
+            )
+        except Exception as e:
+            logger.error(f"Error en .ping: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # WHOIS (INFO DE USUARIO) - Ampliado
+    # WHOIS (INFO DE USUARIO)
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("whois", prefixes=CMD_PREFIXES) & filters.me)
@@ -422,7 +479,6 @@ def register_commands(app: Client, bot_state: dict):
             except:
                 pass
             
-            # Contar grupos en comun
             common_count = 0
             try:
                 async for _ in client.get_common_chats(user.id):
@@ -453,31 +509,33 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("id", prefixes=CMD_PREFIXES) & filters.me)
     async def id_command(client, message):
-        if message.reply_to_message:
-            user = message.reply_to_message.from_user
-            chat_id = message.chat.id
-            fwd_from = message.reply_to_message.forward_from
-            fwd_text = f"\n📤 Reenviado de: `{fwd_from.id}`" if fwd_from else ""
-            await message.edit(
-                f"👤 Usuario: `{user.id}`\n"
-                f"💬 Chat: `{chat_id}`\n"
-                f"📨 Mensaje: `{message.reply_to_message.id}`"
-                f"{fwd_text}"
-            )
-        else:
-            await message.edit(
-                f"💬 Chat ID: `{message.chat.id}`\n"
-                f"👤 Tu ID: `{message.from_user.id}`\n"
-                f"📨 Msg ID: `{message.id}`"
-            )
+        try:
+            if message.reply_to_message:
+                user = message.reply_to_message.from_user
+                chat_id = message.chat.id
+                fwd_from = message.reply_to_message.forward_from
+                fwd_text = f"\n📤 Reenviado de: `{fwd_from.id}`" if fwd_from else ""
+                await message.edit(
+                    f"👤 Usuario: `{user.id}`\n"
+                    f"💬 Chat: `{chat_id}`\n"
+                    f"📨 Mensaje: `{message.reply_to_message.id}`"
+                    f"{fwd_text}"
+                )
+            else:
+                await message.edit(
+                    f"💬 Chat ID: `{message.chat.id}`\n"
+                    f"👤 Tu ID: `{message.from_user.id}`\n"
+                    f"📨 Msg ID: `{message.id}`"
+                )
+        except Exception as e:
+            logger.error(f"Error en .id: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: PURGE - Borrar mensajes en masa
+    # PURGE - Borrar mensajes en masa
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("purge", prefixes=CMD_PREFIXES) & filters.me)
     async def purge_command(client, message):
-        """Borra todos los mensajes desde el mensaje respondido hasta el actual."""
         if not message.reply_to_message:
             await message.edit("❌ Responde a un mensaje para indicar desde donde borrar.\nUso: Responde + `.purge`")
             return
@@ -495,7 +553,6 @@ def register_commands(app: Client, bot_state: dict):
                     deleted += 1
                 except Exception:
                     pass
-                # Pausar cada 20 mensajes para evitar FloodWait
                 if deleted % 20 == 0:
                     await asyncio.sleep(0.5)
             
@@ -510,12 +567,11 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error al purgar: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: DEL - Borrar mensaje respondido
+    # DEL - Borrar mensaje respondido
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("del", prefixes=CMD_PREFIXES) & filters.me)
     async def del_command(client, message):
-        """Borra el mensaje respondido y el comando."""
         if not message.reply_to_message:
             await message.edit("❌ Responde a un mensaje para borrarlo.\nUso: Responde + `.del`")
             return
@@ -527,12 +583,11 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: DELME - Borrar mis ultimos N mensajes
+    # DELME - Borrar mis ultimos N mensajes
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("delme", prefixes=CMD_PREFIXES) & filters.me)
     async def delme_command(client, message):
-        """Borra tus ultimos N mensajes en el chat."""
         args = message.text.split(maxsplit=1)
         count = 5
         if len(args) >= 2:
@@ -567,19 +622,17 @@ def register_commands(app: Client, bot_state: dict):
             await status_msg.edit(f"❌ Error: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: CALC - Calculadora
+    # CALC - Calculadora
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("calc", prefixes=CMD_PREFIXES) & filters.me)
     async def calc_command(client, message):
-        """Calculadora segura. .calc 2+2 o .calc 15*3/4"""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             await message.edit("🧮 **Calculadora**\n\nUso: `.calc 2+2` o `.calc 15*3/4`\nSoporta: +, -, *, /, **, (), %")
             return
         
         expr = args[1].strip()
-        # Solo permitir numeros y operadores matematicos
         allowed = set("0123456789+-*/.()% ")
         if not all(c in allowed for c in expr):
             await message.edit("❌ Solo se permiten numeros y operadores (+, -, *, /, %, ())")
@@ -594,8 +647,36 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: REMIND - Recordatorios
+    # REMIND - Recordatorios
     # ═══════════════════════════════════════════════════════════════
+
+    def _parse_time(time_str: str):
+        """Parsea tiempo tipo 30s, 5m, 2h, 1d"""
+        try:
+            if time_str.endswith('s'):
+                return int(time_str[:-1])
+            elif time_str.endswith('m'):
+                return int(time_str[:-1]) * 60
+            elif time_str.endswith('h'):
+                return int(time_str[:-1]) * 3600
+            elif time_str.endswith('d'):
+                return int(time_str[:-1]) * 86400
+            else:
+                return int(time_str) * 60
+        except (ValueError, IndexError):
+            return None
+
+    def _format_seconds(seconds: float) -> str:
+        """Formatea segundos a texto legible"""
+        seconds = int(max(0, seconds))
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            return f"{seconds // 60}m {seconds % 60}s"
+        elif seconds < 86400:
+            return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+        else:
+            return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
 
     @app.on_message(filters.command("remind", prefixes=CMD_PREFIXES) & filters.me)
     async def remind_command(client, message):
@@ -638,7 +719,6 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit("⏰ Todos los recordatorios eliminados")
             return
         
-        # Parsear tiempo
         time_str = args[1].lower()
         text = args[2] if len(args) > 2 else "Recordatorio!"
         
@@ -661,42 +741,12 @@ def register_commands(app: Client, bot_state: dict):
         
         await message.edit(f"⏰ Recordatorio en **{_format_seconds(seconds)}**: {text}")
 
-    def _parse_time(time_str: str):
-        """Parsea tiempo tipo 30s, 5m, 2h, 1d"""
-        try:
-            if time_str.endswith('s'):
-                return int(time_str[:-1])
-            elif time_str.endswith('m'):
-                return int(time_str[:-1]) * 60
-            elif time_str.endswith('h'):
-                return int(time_str[:-1]) * 3600
-            elif time_str.endswith('d'):
-                return int(time_str[:-1]) * 86400
-            else:
-                # Asumir minutos si no hay sufijo
-                return int(time_str) * 60
-        except (ValueError, IndexError):
-            return None
-
-    def _format_seconds(seconds: float) -> str:
-        """Formatea segundos a texto legible"""
-        seconds = int(max(0, seconds))
-        if seconds < 60:
-            return f"{seconds}s"
-        elif seconds < 3600:
-            return f"{seconds // 60}m {seconds % 60}s"
-        elif seconds < 86400:
-            return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
-        else:
-            return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
-
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: EXEC / EVAL - Ejecutar codigo Python
+    # EXEC / EVAL - Ejecutar codigo Python
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("exec", prefixes=CMD_PREFIXES) & filters.me)
     async def exec_command(client, message):
-        """Ejecuta codigo Python y muestra el resultado."""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             await message.edit("🖥️ **Ejecutar Python**\n\nUso: `.exec print('Hola')`\n⚠️ Ten cuidado con lo que ejecutas")
@@ -710,12 +760,10 @@ def register_commands(app: Client, bot_state: dict):
             output = io.StringIO()
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 try:
-                    # Intentar eval como expresion primero
                     result = eval(code, {"__builtins__": {}, "client": client, "message": message, "bot_state": bot_state})
                     if result is not None:
                         print(repr(result))
                 except SyntaxError:
-                    # Si es syntax error, ejecutar como statement
                     exec(code, {"__builtins__": {}, "client": client, "message": message, "bot_state": bot_state})
             
             result_text = output.getvalue().strip()
@@ -730,7 +778,6 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("eval", prefixes=CMD_PREFIXES) & filters.me)
     async def eval_command(client, message):
-        """Evalua una expresion Python y muestra el resultado."""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             await message.edit("🖥️ **Evaluar expresion**\n\nUso: `.eval 2+2`\n`.eval len('hola')`")
@@ -744,19 +791,17 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ **Error:** `{type(e).__name__}: {e}`")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: SED - Reemplazar texto en mensajes (s/old/new)
+    # SED - Reemplazar texto en mensajes (s/old/new)
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.regex(r"^[\.\/!]s/") & filters.me)
     async def sed_command(client, message):
         """Reemplaza texto en tu ultimo mensaje o en el respondido. s/old/new/flags"""
         text = message.text
-        # Solo procesar si empieza con s/
         if not re.match(r'^[\.\/!]s/', text):
             return
         
-        # Parsear s/old/new/flags
-        sed_text = text[2:]  # Quitar prefijo (., /, !)
+        sed_text = text[2:]
         parts = sed_text.split('/')
         if len(parts) < 3:
             return
@@ -768,13 +813,11 @@ def register_commands(app: Client, bot_state: dict):
         if not old:
             return
         
-        # Buscar el mensaje a editar
         target_msg = None
         if message.reply_to_message:
             if message.reply_to_message.from_user and message.reply_to_message.from_user.id == message.from_user.id:
                 target_msg = message.reply_to_message
         else:
-            # Buscar mi ultimo mensaje en el chat
             try:
                 async for msg in client.get_chat_history(message.chat.id, limit=10):
                     if msg.from_user and msg.from_user.id == message.from_user.id and msg.id != message.id:
@@ -792,16 +835,15 @@ def register_commands(app: Client, bot_state: dict):
                 pass
             return
         
-        # Realizar reemplazo
         original = target_msg.text
         re_flags = 0
-        count = 0  # 0 = reemplazar todos
+        count = 0
         
         if 'i' in flags:
             re_flags |= re.IGNORECASE
         
         if 'g' not in flags:
-            count = 1  # Solo primera ocurrencia si no hay flag g
+            count = 1
         
         try:
             new_text = re.sub(re.escape(old), new, original, count=count, flags=re_flags)
@@ -826,17 +868,15 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error editando: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: TRADUCIR - Traductor
+    # TRADUCIR - Traductor
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("tr", prefixes=CMD_PREFIXES) & filters.me)
     async def translate_command(client, message):
-        """Traduce texto. .tr es Hello World o responde a un mensaje con .tr es"""
         args = message.text.split(maxsplit=2)
         
-        target_lang = "es"  # Default: espanol
+        target_lang = "es"
         
-        # Si responde a un mensaje
         if message.reply_to_message and message.reply_to_message.text:
             text_to_translate = message.reply_to_message.text
             if len(args) >= 2:
@@ -857,7 +897,6 @@ def register_commands(app: Client, bot_state: dict):
             return
         
         try:
-            # Usar MyMemory API (gratis, sin API key)
             encoded_text = urllib.request.quote(text_to_translate)
             url = f"https://api.mymemory.translated.net/get?q={encoded_text}&langpair=auto|{target_lang}"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -877,12 +916,11 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error traduciendo: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: QR - Generador de codigos QR
+    # QR - Generador de codigos QR
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("qr", prefixes=CMD_PREFIXES) & filters.me)
     async def qr_command(client, message):
-        """Genera un codigo QR. .qr https://ejemplo.com"""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             await message.edit("📱 **Codigo QR**\n\nUso: `.qr https://ejemplo.com`\n`.qr Hola mundo!`")
@@ -908,7 +946,6 @@ def register_commands(app: Client, bot_state: dict):
             await message.delete()
             await client.send_photo(message.chat.id, qr_path, caption=f"📱 QR: `{text[:100]}`")
             
-            # Limpiar
             try:
                 from pathlib import Path
                 Path(qr_path).unlink(missing_ok=True)
@@ -916,7 +953,6 @@ def register_commands(app: Client, bot_state: dict):
                 pass
             
         except ImportError:
-            # Si qrcode no esta instalado, usar API alternativa
             try:
                 encoded = urllib.request.quote(text)
                 url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={encoded}"
@@ -937,12 +973,11 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: CLONE - Clonar perfil de usuario
+    # CLONE - Clonar perfil de usuario
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("clone", prefixes=CMD_PREFIXES) & filters.me)
     async def clone_command(client, message):
-        """Copia el nombre y bio de otro usuario. Responde + .clone"""
         if not message.reply_to_message:
             await message.edit("❌ Responde al mensaje de un usuario para clonar su perfil.\nUso: Responde + `.clone`")
             return
@@ -951,7 +986,6 @@ def register_commands(app: Client, bot_state: dict):
             user = message.reply_to_message.from_user
             full_user = await client.get_chat(user.id)
             
-            # Copiar nombre
             first_name = user.first_name or ""
             last_name = user.last_name or ""
             bio = getattr(full_user, 'bio', '') or ""
@@ -962,7 +996,6 @@ def register_commands(app: Client, bot_state: dict):
                 bio=bio,
             )
             
-            # Intentar copiar foto
             photo_copied = False
             try:
                 photos = client.get_chat_photos(user.id)
@@ -989,26 +1022,22 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error clonando: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: SPEEDTEST - Test de velocidad
+    # SPEEDTEST - Test de velocidad
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("speedtest", prefixes=CMD_PREFIXES) & filters.me)
     async def speedtest_command(client, message):
-        """Ejecuta un test de velocidad de red."""
         await message.edit("📡 Ejecutando test de velocidad...")
         
         try:
-            # Test simple de latencia y descarga
             import socket
             import time
             
-            # Latencia a Google DNS
             start = time_mod.time()
             sock = socket.create_connection(("8.8.8.8", 53), timeout=5)
             latency = round((time_mod.time() - start) * 1000)
             sock.close()
             
-            # Test de descarga
             start_dl = time_mod.time()
             try:
                 req = urllib.request.Request("https://speed.cloudflare.com/__down?bytes=1000000", headers={"User-Agent": "Mozilla/5.0"})
@@ -1029,12 +1058,11 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error en speedtest: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: URL - Acortar URLs
+    # URL - Acortar URLs
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("short", prefixes=CMD_PREFIXES) & filters.me)
     async def short_url_command(client, message):
-        """Acorta una URL. .short https://ejemplo.com"""
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
             await message.edit("🔗 **Acortador de URLs**\n\nUso: `.short https://ejemplo.com`")
@@ -1045,7 +1073,6 @@ def register_commands(app: Client, bot_state: dict):
             url = "https://" + url
         
         try:
-            # Usar is.gd (gratis, sin API key)
             encoded = urllib.request.quote(url)
             api_url = f"https://is.gd/create.php?format=json&url={encoded}"
             req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
@@ -1064,12 +1091,11 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: KANG - Robar stickers
+    # KANG - Robar stickers
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("kang", prefixes=CMD_PREFIXES) & filters.me)
     async def kang_command(client, message):
-        """Roba un sticker o imagen y lo agrega a tu pack. Responde + .kang"""
         if not message.reply_to_message:
             await message.edit("❌ Responde a un sticker o imagen para robarlo.\nUso: Responde + `.kang` o `.kang emoji`")
             return
@@ -1097,7 +1123,6 @@ def register_commands(app: Client, bot_state: dict):
                 await message.edit("❌ No se pudo descargar el archivo")
                 return
             
-            # Redimensionar a 512x512 si es necesario
             try:
                 from PIL import Image as PILImage
                 img = PILImage.open(sticker_path)
@@ -1110,7 +1135,6 @@ def register_commands(app: Client, bot_state: dict):
             except:
                 pass
             
-            # Crear o agregar al pack
             pack_name = f"kang_{message.from_user.id}_by_{client.me.username or 'user'}"
             
             try:
@@ -1121,7 +1145,6 @@ def register_commands(app: Client, bot_state: dict):
                 )
                 await message.edit(f"🎨 Sticker agregado a tu pack! {emoji}\n📌 Pack: `{pack_name}`")
             except Exception:
-                # Si el pack no existe, crearlo
                 try:
                     await client.create_sticker_set(
                         user_id=message.from_user.id,
@@ -1134,7 +1157,6 @@ def register_commands(app: Client, bot_state: dict):
                 except Exception as e2:
                     await message.edit(f"❌ Error creando pack: {e2}")
             
-            # Limpiar
             try:
                 from pathlib import Path
                 Path(sticker_path).unlink(missing_ok=True)
@@ -1145,12 +1167,11 @@ def register_commands(app: Client, bot_state: dict):
             await message.edit(f"❌ Error kang: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: SAVE - Guardar contenido restringido
+    # SAVE - Guardar contenido restringido
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("save", prefixes=CMD_PREFIXES) & filters.me)
     async def save_command(client, message):
-        """Descarga media de un mensaje (incluso de chats restringidos). Responde + .save"""
         if not message.reply_to_message:
             await message.edit("❌ Responde a un mensaje con media para guardarlo.\nUso: Responde + `.save`")
             return
@@ -1195,13 +1216,12 @@ def register_commands(app: Client, bot_state: dict):
                     caption += f"\n\n{reply.caption[:500]}"
                 
                 await client.send_document(
-                    "me",  # Enviar a "Saved Messages"
+                    "me",
                     file_path,
                     caption=caption,
                 )
                 await status_msg.edit(f"✅ {media_type.capitalize()} guardado en Saved Messages")
                 
-                # Limpiar archivo temporal
                 try:
                     from pathlib import Path
                     Path(file_path).unlink(missing_ok=True)
@@ -1214,12 +1234,11 @@ def register_commands(app: Client, bot_state: dict):
             await status_msg.edit(f"❌ Error: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: PM PERMIT - Anti-spam en mensajes privados
+    # PM PERMIT - Anti-spam en mensajes privados
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("pmpermit", prefixes=CMD_PREFIXES) & filters.me)
     async def pmpermit_command(client, message):
-        """Controla el filtro de mensajes privados."""
         args = message.text.split(maxsplit=1)
         
         if len(args) < 2:
@@ -1268,32 +1287,36 @@ def register_commands(app: Client, bot_state: dict):
                 await message.edit("❌ Usuario no encontrado")
 
     # ═══════════════════════════════════════════════════════════════
-    # NUEVO: INFO DEL SISTEMA
+    # INFO DEL SISTEMA - FIX: import sys added at top
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("sysinfo", prefixes=CMD_PREFIXES) & filters.me)
     async def sysinfo_command(client, message):
-        """Muestra informacion del sistema donde corre el bot."""
-        import platform
-        
-        start_time = bot_state.get("start_time", time_mod.time())
-        uptime_s = int(time_mod.time() - start_time)
-        hours = uptime_s // 3600
-        minutes = (uptime_s % 3600) // 60
-        uptime_str = f"{hours}h {minutes}m"
-        
-        await message.edit(
-            f"🖥️ **System Info**\n\n"
-            f"🐍 Python: `{sys.version.split()[0]}`\n"
-            f"🖥️ OS: `{platform.system()} {platform.release()}`\n"
-            f"🏗️ Arch: `{platform.machine()}`\n"
-            f"⏱️ Uptime: **{uptime_str}**\n"
-            f"🔄 Updates: **{bot_state.get('update_count', 0)}**\n"
-            f"📝 Notas: **{len(bot_state.get('notes', {}))}**\n"
-            f"⏰ Recordatorios: **{len(bot_state.get('reminders', []))}**\n"
-            f"🔀 SED edits: **{bot_state.get('sed_count', 0)}**\n"
-            f"📡 Connected: **{'✅' if bot_state.get('connected') else '❌'}**"
-        )
+        try:
+            import platform
+            
+            start_time = bot_state.get("start_time", time_mod.time())
+            uptime_s = int(time_mod.time() - start_time)
+            hours = uptime_s // 3600
+            minutes = (uptime_s % 3600) // 60
+            uptime_str = f"{hours}h {minutes}m"
+            
+            await message.edit(
+                f"🖥️ **System Info**\n\n"
+                f"🐍 Python: `{sys.version.split()[0]}`\n"
+                f"🖥️ OS: `{platform.system()} {platform.release()}`\n"
+                f"🏗️ Arch: `{platform.machine()}`\n"
+                f"⏱️ Uptime: **{uptime_str}**\n"
+                f"🔄 Updates: **{bot_state.get('update_count', 0)}**\n"
+                f"📝 Notas: **{len(bot_state.get('notes', {}))}**\n"
+                f"⏰ Recordatorios: **{len(bot_state.get('reminders', []))}**\n"
+                f"🔀 SED edits: **{bot_state.get('sed_count', 0)}**\n"
+                f"📡 Connected: **{'✅' if bot_state.get('connected') else '❌'}**"
+            )
+        except Exception as e:
+            logger.error(f"Error en .sysinfo: {e}")
+            try: await message.edit(f"❌ Error en sysinfo: {e}")
+            except: pass
 
     # ═══════════════════════════════════════════════════════════════
     # ESTADO COMPLETO
@@ -1301,90 +1324,96 @@ def register_commands(app: Client, bot_state: dict):
 
     @app.on_message(filters.command("status", prefixes=CMD_PREFIXES) & filters.me)
     async def status_command(client, message):
-        state = bot_state
-        start_time = state.get("start_time", time_mod.time())
-        uptime_s = int(time_mod.time() - start_time)
-        hours = uptime_s // 3600
-        minutes = (uptime_s % 3600) // 60
-        uptime_str = f"{hours}h {minutes}m"
-        
-        active = "✅ ACTIVO" if state.get("bot_active", True) else "⏸️ PAUSADO"
-        
-        text = (
-            f"🤖 **DateTime Userbot v3.0**\n\n"
-            f"⚡ Estado: {active}\n"
-            f"🔌 Conectado: {'✅' if state.get('connected') else '❌'}\n"
-            f"⏱️ Uptime: {uptime_str}\n"
-            f"🎨 Estilo: {state.get('image_style', 'auto')}\n"
-            f"🖼️ Tema: {state.get('bg_theme', 'auto') or 'auto'}\n"
-            f"💬 Frases: {state.get('bio_category', 'random')}\n"
-            f"🎭 Mood: {state.get('mood', 'none')}\n"
-            f"🌤 Clima: {'✅' if state.get('show_weather') else '❌'}\n"
-            f"📊 Progreso: {'✅' if state.get('show_progress') else '❌'}\n"
-            f"📴 AFK: {'✅' if state.get('afk_enabled') else '❌'}\n"
-            f"📅 Countdown: {state.get('countdown_date', 'No') or 'No'}\n"
-            f"⏱️ Intervalo: {state.get('update_interval', 60)}s\n"
-            f"🔄 Updates: {state.get('update_count', 0)}\n"
-            f"📝 Notas: {len(state.get('notes', {}))}\n"
-            f"⏰ Recordatorios: {len(state.get('reminders', []))}\n"
-            f"🛡️ PM Permit: {'✅' if state.get('pm_permit') else '❌'}"
-        )
-        await message.edit(text)
+        try:
+            state = bot_state
+            start_time = state.get("start_time", time_mod.time())
+            uptime_s = int(time_mod.time() - start_time)
+            hours = uptime_s // 3600
+            minutes = (uptime_s % 3600) // 60
+            uptime_str = f"{hours}h {minutes}m"
+            
+            active = "✅ ACTIVO" if state.get("bot_active", True) else "⏸️ PAUSADO"
+            
+            text = (
+                f"🤖 **DateTime Userbot v3.1**\n\n"
+                f"⚡ Estado: {active}\n"
+                f"🔌 Conectado: {'✅' if state.get('connected') else '❌'}\n"
+                f"⏱️ Uptime: {uptime_str}\n"
+                f"🎨 Estilo: {state.get('image_style', 'auto')}\n"
+                f"🖼️ Tema: {state.get('bg_theme', 'auto') or 'auto'}\n"
+                f"💬 Frases: {state.get('bio_category', 'random')}\n"
+                f"🎭 Mood: {state.get('mood', 'none')}\n"
+                f"🌤 Clima: {'✅' if state.get('show_weather') else '❌'}\n"
+                f"📊 Progreso: {'✅' if state.get('show_progress') else '❌'}\n"
+                f"📴 AFK: {'✅' if state.get('afk_enabled') else '❌'}\n"
+                f"📅 Countdown: {state.get('countdown_date', 'No') or 'No'}\n"
+                f"⏱️ Intervalo: {state.get('update_interval', 60)}s\n"
+                f"🔄 Updates: {state.get('update_count', 0)}\n"
+                f"📝 Notas: {len(state.get('notes', {}))}\n"
+                f"⏰ Recordatorios: {len(state.get('reminders', []))}\n"
+                f"🛡️ PM Permit: {'✅' if state.get('pm_permit') else '❌'}"
+            )
+            await message.edit(text)
+        except Exception as e:
+            logger.error(f"Error en .status: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # AYUDA COMPLETA v3.0
+    # AYUDA COMPLETA v3.1
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.command("help", prefixes=CMD_PREFIXES) & filters.me)
     async def help_command(client, message):
-        text = (
-            "🤖 **DateTime Userbot v3.0 - Comandos**\n\n"
-            "**⚡ Control:**\n"
-            "`.on` - Activar bot\n"
-            "`.off` - Pausar bot\n"
-            "`.ping` - Latencia + uptime\n"
-            "`.status` - Estado completo\n"
-            "`.restart` - Reiniciar bot\n"
-            "`.sysinfo` - Info del sistema\n\n"
-            "**🎨 Apariencia:**\n"
-            "`.style [auto|neon|retro|minimal|gradient]` - Estilo\n"
-            "`.theme [anime|code|gaming|nature|cyberpunk|ocean|sunset|galaxy|retro|minimal|off]` - Tema\n"
-            "`.themes` - Lista de temas\n"
-            "`.mood [happy|sad|busy|sleeping|love|gaming|coding|music|coffee|vibes|angry|chill|off]` - Mood\n\n"
-            "**💬 Bio y perfil:**\n"
-            "`.quote [random|motivation|humor|philosophy|love|tech|life|schedule]` - Frases\n"
-            "`.bio [texto|off]` - Bio personalizada\n"
-            "`.name [texto|off]` - Apellido personalizado\n"
-            "`.interval [30-600]` - Segundos entre updates\n\n"
-            "**📊 Extras:**\n"
-            "`.weather [on|off]` - Clima\n"
-            "`.progress [on|off]` - Barra progreso\n"
-            "`.countdown [fecha|off] [label]` - Cuenta regresiva\n"
-            "`.afk [on|off|mensaje]` - Modo AFK\n\n"
-            "**🛠️ Utilidades:**\n"
-            "`.note [save|get|list|del]` - Notas\n"
-            "`.remind [30m|2h|1d] [texto]` - Recordatorios\n"
-            "`.calc [expresion]` - Calculadora\n"
-            "`.tr [idioma] [texto]` - Traductor\n"
-            "`.qr [texto]` - Codigo QR\n"
-            "`.short [url]` - Acortar URL\n"
-            "`.whois` - Info de usuario\n"
-            "`.id` - IDs de chat/usuario\n\n"
-            "**🔥 Poder:**\n"
-            "`.purge` - Borrar mensajes en masa\n"
-            "`.del` - Borrar mensaje respondido\n"
-            "`.delme [N]` - Borrar mis ultimos N mensajes\n"
-            "`.save` - Guardar media (chats restringidos)\n"
-            "`.kang` - Robar sticker\n"
-            "`.clone` - Clonar perfil de usuario\n"
-            "`.exec [codigo]` - Ejecutar Python\n"
-            "`.eval [expr]` - Evaluar expresion\n"
-            "`.speedtest` - Test de velocidad\n"
-            "`.pmpermit [on|off|approve|disapprove]` - Anti-spam PM\n"
-            "`s/old/new/` - Reemplazar texto\n\n"
-            "💡 Tambien funciona con / y ! (ej: /help o !status)"
-        )
-        await message.edit(text)
+        try:
+            text = (
+                "🤖 **DateTime Userbot v3.1 - Comandos**\n\n"
+                "**⚡ Control:**\n"
+                "`.on` - Activar bot\n"
+                "`.off` - Pausar bot\n"
+                "`.ping` - Latencia + uptime\n"
+                "`.status` - Estado completo\n"
+                "`.restart` - Reiniciar bot\n"
+                "`.sysinfo` - Info del sistema\n\n"
+                "**🎨 Apariencia:**\n"
+                "`.style [auto|neon|retro|minimal|gradient]` - Estilo\n"
+                "`.theme [anime|code|gaming|nature|cyberpunk|ocean|sunset|galaxy|retro|minimal|off]` - Tema\n"
+                "`.themes` - Lista de temas\n"
+                "`.mood [happy|sad|busy|sleeping|love|gaming|coding|music|coffee|vibes|angry|chill|off]` - Mood\n\n"
+                "**💬 Bio y perfil:**\n"
+                "`.quote [random|motivation|humor|philosophy|love|tech|life|schedule]` - Frases\n"
+                "`.bio [texto|off]` - Bio personalizada\n"
+                "`.name [texto|off]` - Apellido personalizado\n"
+                "`.interval [30-600]` - Segundos entre updates\n\n"
+                "**📊 Extras:**\n"
+                "`.weather [on|off]` - Clima\n"
+                "`.progress [on|off]` - Barra progreso\n"
+                "`.countdown [fecha|off] [label]` - Cuenta regresiva\n"
+                "`.afk [on|off|mensaje]` - Modo AFK\n\n"
+                "**🛠️ Utilidades:**\n"
+                "`.note [save|get|list|del]` - Notas\n"
+                "`.remind [30m|2h|1d] [texto]` - Recordatorios\n"
+                "`.calc [expresion]` - Calculadora\n"
+                "`.tr [idioma] [texto]` - Traductor\n"
+                "`.qr [texto]` - Codigo QR\n"
+                "`.short [url]` - Acortar URL\n"
+                "`.whois` - Info de usuario\n"
+                "`.id` - IDs de chat/usuario\n\n"
+                "**🔥 Poder:**\n"
+                "`.purge` - Borrar mensajes en masa\n"
+                "`.del` - Borrar mensaje respondido\n"
+                "`.delme [N]` - Borrar mis ultimos N mensajes\n"
+                "`.save` - Guardar media (chats restringidos)\n"
+                "`.kang` - Robar sticker\n"
+                "`.clone` - Clonar perfil de usuario\n"
+                "`.exec [codigo]` - Ejecutar Python\n"
+                "`.eval [expr]` - Evaluar expresion\n"
+                "`.speedtest` - Test de velocidad\n"
+                "`.pmpermit [on|off|approve|disapprove]` - Anti-spam PM\n"
+                "`s/old/new/` - Reemplazar texto\n\n"
+                "💡 Tambien funciona con / y ! (ej: /help o !status)"
+            )
+            await message.edit(text)
+        except Exception as e:
+            logger.error(f"Error en .help: {e}")
 
     # ═══════════════════════════════════════════════════════════════
     # REINICIAR
@@ -1393,63 +1422,71 @@ def register_commands(app: Client, bot_state: dict):
     @app.on_message(filters.command("restart", prefixes=CMD_PREFIXES) & filters.me)
     async def restart_command(client, message):
         """Reinicia la conexion del bot."""
-        await message.edit("🔄 Reiniciando bot...")
-        bot_state["connected"] = False
-        bot_state["restart_requested"] = True
+        try:
+            await message.edit("🔄 Reiniciando bot...")
+            bot_state["connected"] = False
+            bot_state["restart_requested"] = True
+        except Exception as e:
+            logger.error(f"Error en .restart: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # HANDLER AFK
+    # HANDLER AFK - FIX: proper filter
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.private & ~filters.me)
     async def afk_handler(client, message):
-        if not bot_state.get("afk_enabled", False) and not bot_state.get("pm_permit", False):
-            return
-        
-        user_id = message.from_user.id
-        
-        # PM Permit check
-        if bot_state.get("pm_permit", False) and user_id not in bot_state.get("approved_users", set()):
-            try:
-                await message.reply(
-                    "🛡️ **PM Permit Activo**\n\n"
-                    "Este usuario no acepta mensajes de personas no aprobadas.\n"
-                    "Por favor, espera a que te apruebe."
-                )
-            except:
-                pass
-            return
-        
-        # AFK check
-        if bot_state.get("afk_enabled", False):
-            replied_set = bot_state.get("afk_replied", set())
+        try:
+            if not bot_state.get("afk_enabled", False) and not bot_state.get("pm_permit", False):
+                return
             
-            if user_id not in replied_set:
-                afk_msg = bot_state.get("afk_message", "No estoy disponible ahora.")
-                afk_since = bot_state.get("afk_since", "")
+            user_id = message.from_user.id
+            
+            # PM Permit check
+            if bot_state.get("pm_permit", False) and user_id not in bot_state.get("approved_users", set()):
                 try:
-                    extra = f"\nAFK desde: {afk_since}" if afk_since else ""
-                    await message.reply(f"📴 {afk_msg}{extra}")
-                    replied_set.add(user_id)
-                    bot_state["afk_replied"] = replied_set
+                    await message.reply(
+                        "🛡️ **PM Permit Activo**\n\n"
+                        "Este usuario no acepta mensajes de personas no aprobadas.\n"
+                        "Por favor, espera a que te apruebe."
+                    )
                 except:
                     pass
+                return
+            
+            # AFK check
+            if bot_state.get("afk_enabled", False):
+                replied_set = bot_state.get("afk_replied", set())
+                
+                if user_id not in replied_set:
+                    afk_msg = bot_state.get("afk_message", "No estoy disponible ahora.")
+                    afk_since = bot_state.get("afk_since", "")
+                    try:
+                        extra = f"\nAFK desde: {afk_since}" if afk_since else ""
+                        await message.reply(f"📴 {afk_msg}{extra}")
+                        replied_set.add(user_id)
+                        bot_state["afk_replied"] = replied_set
+                    except:
+                        pass
+        except Exception as e:
+            logger.error(f"Error en afk_handler: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # LOG: Desactivar AFK al escribir
+    # LOG: Desactivar AFK al escribir - FIX: proper filter
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.private & filters.me & ~filters.command("", prefixes=CMD_PREFIXES))
+    @app.on_message(filters.private & filters.me)
     async def auto_disable_afk(client, message):
         """Desactiva AFK automaticamente cuando escribes."""
-        if bot_state.get("afk_enabled", False):
-            afk_count = len(bot_state.get("afk_replied", set()))
-            bot_state["afk_enabled"] = False
-            bot_state["afk_replied"] = set()
-            try:
-                await message.reply(f"📴 AFK desactivado automaticamente ({afk_count} personas te escribieron)")
-            except:
-                pass
+        try:
+            if bot_state.get("afk_enabled", False):
+                afk_count = len(bot_state.get("afk_replied", set()))
+                bot_state["afk_enabled"] = False
+                bot_state["afk_replied"] = set()
+                try:
+                    await message.reply(f"📴 AFK desactivado automaticamente ({afk_count} personas te escribieron)")
+                except:
+                    pass
+        except Exception as e:
+            logger.error(f"Error en auto_disable_afk: {e}")
 
-    logger = __import__('logging').getLogger("DateTimeUserbot")
-    logger.info("Comandos v3.0 registrados con prefijos: . / !")
+    logger.info(f"Comandos v3.1 registrados con prefijos: {CMD_PREFIXES}")
