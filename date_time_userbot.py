@@ -249,12 +249,12 @@ try:
 except Exception as e:
     log_startup(f"ERROR registrando dashboard: {e}")
 
-# ─── Registrar Comandos (se hara DESPUES de start() para asegurar dispatcher) ──
-commands_registered = False
+# ─── Registrar Comandos ───────────────────────────────────────────
 try:
     from commands import register_commands
     log_startup("Modulo de comandos importado")
 except Exception as e:
+    register_commands = None
     log_startup(f"ERROR importando modulo de comandos: {e}")
 
 # ─── Notificaciones ───────────────────────────────────────────────
@@ -334,7 +334,6 @@ async def main_bot():
         log_startup("No se puede iniciar bot: Pyrogram no disponible")
         return
 
-    global commands_registered
     retry_count = 0
     base_delay = 5
     last_success_time = 0
@@ -356,15 +355,12 @@ async def main_bot():
         
         # CRITICAL: Registrar comandos DESPUES de start()
         # Esto asegura que el dispatcher este correctamente inicializado
-        if not commands_registered:
-            try:
+        try:
+            if register_commands:
                 register_commands(userbot, bot_state)
-                commands_registered = True
-                # Verificar handlers
-                handler_count = sum(len(v) for v in getattr(userbot, 'dispatcher', type('',(),{'groups':{}})).groups.values()) if hasattr(userbot, 'dispatcher') else '?'
-                log_startup(f"Comandos registrados DESPUES de start() - Handlers: {handler_count}")
-            except Exception as e:
-                log_startup(f"ERROR registrando comandos despues de start(): {e}")
+                log_startup("Comandos registrados DESPUES de start() - OK")
+        except Exception as e:
+            log_startup(f"ERROR registrando comandos despues de start(): {e}")
         
         await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
     except (AuthKeyUnregistered, SessionRevoked) as e:
