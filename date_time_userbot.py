@@ -334,6 +334,7 @@ async def main_bot():
         log_startup("No se puede iniciar bot: Pyrogram no disponible")
         return
 
+    nonlocal commands_registered
     retry_count = 0
     base_delay = 5
     last_success_time = 0
