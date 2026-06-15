@@ -96,6 +96,19 @@ def health():
 
 @app.route("/debug")
 def debug_info():
+    # Check handler registration
+    handler_info = {}
+    if userbot and hasattr(userbot, 'dispatcher'):
+        try:
+            groups = userbot.dispatcher.groups
+            handler_info = {
+                "groups_count": len(groups),
+                "total_handlers": sum(len(v) for v in groups.values()),
+                "group_keys": list(groups.keys()),
+            }
+        except Exception as e:
+            handler_info = {"error": str(e)}
+    
     return jsonify({
         "status": "alive",
         "bot_started": bot_state["started"],
@@ -117,6 +130,7 @@ def debug_info():
         "notes_count": len(bot_state.get("notes", {})),
         "reminders_count": len(bot_state.get("reminders", [])),
         "command_count": bot_state.get("command_count", 0),
+        "handler_info": handler_info,
         "python_version": sys.version,
         "startup_log": bot_state["startup_log"],
     })
@@ -510,14 +524,20 @@ async def main_bot():
                     uptime_str=uptime_str,
                 )
 
-            # Solo subir foto cada 5 ciclos (5 min) o si nunca se ha subido
+            # Solo subir foto cada 10 ciclos (10 min) o si nunca se ha subido
             current_time = time_mod.time()
             should_upload_photo = (
                 bot_state.get("last_photo_time", 0) == 0 or
-                (current_time - bot_state.get("last_photo_time", 0)) >= 300
+                (current_time - bot_state.get("last_photo_time", 0)) >= 600
             )
 
-            # No subir si estamos en FloodWait
+            # No subir si estamos en FloodWait o si las ultimas 3 subidas fallaron
+            consecutive_photo_fails = bot_state.get("consecutive_photo_fails", 0)
+            if consecutive_photo_fails >= 3:
+                should_upload_photo = False
+                if bot_state.get("photo_update_counter", 0) % 20 == 0:
+                    log_startup("Foto: saltando (3+ fallos consecutivos)")
+            
             if current_time < bot_state.get("photo_flood_wait_until", 0):
                 remaining = int(bot_state["photo_flood_wait_until"] - current_time)
                 should_upload_photo = False
@@ -526,11 +546,13 @@ async def main_bot():
             
             if image_path and should_upload_photo:
                 try:
-                    await asyncio.wait_for(userbot.set_profile_photo(photo=image_path), timeout=30)
+                    await asyncio.wait_for(userbot.set_profile_photo(photo=image_path), timeout=60)
                     bot_state["last_photo_time"] = time_mod.time()
+                    bot_state["consecutive_photo_fails"] = 0
                     log_startup("Foto subida OK")
                 except asyncio.TimeoutError:
-                    log_startup("TIMEOUT subiendo foto (30s)")
+                    bot_state["consecutive_photo_fails"] = bot_state.get("consecutive_photo_fails", 0) + 1
+                    log_startup(f"TIMEOUT subiendo foto (60s) - intento #{bot_state['consecutive_photo_fails']}")
                 except FloodWait as e:
                     flood_until = time_mod.time() + e.value
                     bot_state["photo_flood_wait_until"] = flood_until
