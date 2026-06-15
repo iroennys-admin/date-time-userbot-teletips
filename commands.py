@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Comandos de Telegram para el DateTime Userbot v3.1 - Maquina Potente"""
+"""Comandos de Telegram para el DateTime Userbot v3.2 - Maquina Potente"""
 
 from pyrogram import Client, filters
 import datetime
@@ -17,6 +17,17 @@ CMD_PREFIXES = ".!/"
 
 def register_commands(app: Client, bot_state: dict):
     """Registra todos los comandos del bot."""
+
+    # ═══════════════════════════════════════════════════════════════
+    # COMMAND TRACKING (grupo -10 = se ejecuta antes que los demas)
+    # ═══════════════════════════════════════════════════════════════
+
+    @app.on_message(filters.regex(r'^[\.\/!]\w+') & filters.me, group=-10)
+    async def track_commands(client, message):
+        """Cuenta cada comando recibido para diagnostico."""
+        bot_state["command_count"] = bot_state.get("command_count", 0) + 1
+        cmd = message.text.split()[0] if message.text else "?"
+        logger.info(f"[CMD] Comando recibido: {cmd} (total: {bot_state['command_count']})")
 
     # ═══════════════════════════════════════════════════════════════
     # ENCENDIDO / APAGADO

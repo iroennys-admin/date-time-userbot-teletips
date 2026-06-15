@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
-DATE TIME USERBOT v3.1 - Maquina Potente
-FIX: Use client.run() pattern for proper update reception.
-Based on original TeLeTiPs pattern: asyncio.ensure_future() + client.run()
+DATE TIME USERBOT v3.2 - Maquina Potente
+FIX v3.2: Use async with userbot + asyncio.run() pattern.
+This ensures Pyrogram's update dispatcher runs on the SAME event loop
+as our background tasks, so incoming updates (messages) are properly
+dispatched to registered handlers.
+
+Previous versions used asyncio.ensure_future() + client.run() which
+could cause the update handler and main_bot() to run on different
+event loops, preventing incoming messages from reaching handlers.
 """
 
 import os
@@ -68,6 +74,7 @@ bot_state = {
     "raw_update_count": 0,
     "msg_received_count": 0,
     "consecutive_photo_fails": 0,
+    "loop_running": False,
 }
 
 def log_startup(msg):
@@ -131,12 +138,15 @@ app = Flask(__name__)
 def health_check():
     return jsonify({
         "status": "alive",
-        "bot": "DateTimeUserbot v3.1",
+        "bot": "DateTimeUserbot v3.2",
         "connected": bot_state["connected"],
         "bot_active": bot_state["bot_active"],
         "last_update": bot_state["last_update"],
         "update_count": bot_state["update_count"],
         "command_count": bot_state.get("command_count", 0),
+        "raw_update_count": bot_state.get("raw_update_count", 0),
+        "msg_received_count": bot_state.get("msg_received_count", 0),
+        "loop_running": bot_state.get("loop_running", False),
     })
 
 @app.route("/health")
@@ -168,11 +178,12 @@ def debug_info():
         "command_count": bot_state.get("command_count", 0),
         "raw_update_count": bot_state.get("raw_update_count", 0),
         "msg_received_count": bot_state.get("msg_received_count", 0),
+        "loop_running": bot_state.get("loop_running", False),
         "python_version": sys.version,
         "startup_log": bot_state["startup_log"],
     })
 
-log_startup("Flask app creada - v3.1")
+log_startup("Flask app creada - v3.2")
 
 # ─── Imports ───────────────────────────────────────────────────────
 pyrogram_ok = False
@@ -253,15 +264,34 @@ except Exception as e:
     log_startup(f"ERROR registrando dashboard: {e}")
 
 # ─── Registrar Comandos ───────────────────────────────────────────
-# CRITICAL: Register BEFORE client.run() so Pyrogram's update 
-# dispatcher can find the handlers when it starts processing updates.
 if userbot:
     try:
         from commands import register_commands
         register_commands(userbot, bot_state)
-        log_startup("Comandos registrados (antes de run)")
+        log_startup("Comandos registrados OK")
     except Exception as e:
         log_startup(f"ERROR registrando comandos: {e}")
+
+# ─── Diagnostic Handlers ──────────────────────────────────────────
+# These handlers help us verify that Pyrogram is receiving incoming
+# updates and messages. They track counts visible via /debug endpoint.
+if userbot:
+    @userbot.on_raw_update()
+    async def raw_update_handler(client, update, users, chats):
+        """Track every raw update received from Telegram."""
+        bot_state["raw_update_count"] = bot_state.get("raw_update_count", 0) + 1
+
+    @userbot.on_message(filters.all & filters.me, group=-1)
+    async def diagnostic_own_msg(client, message):
+        """Track messages from our own account (diagnostic only)."""
+        bot_state["msg_received_count"] = bot_state.get("msg_received_count", 0) + 1
+
+    @userbot.on_message(filters.all & ~filters.me, group=-1)
+    async def diagnostic_other_msg(client, message):
+        """Track messages from other users (diagnostic only)."""
+        bot_state["msg_received_count"] = bot_state.get("msg_received_count", 0) + 1
+
+    log_startup("Diagnostic handlers registrados (raw_update + msg tracking)")
 
 # ─── Helper functions ──────────────────────────────────────────────
 async def send_notification(message: str):
@@ -325,22 +355,18 @@ def get_uptime_str() -> str:
         return f"{hours}h{minutes}m"
     return f"{minutes}m"
 
-# ─── Bucle Principal del Bot ──────────────────────────────────────
-async def main_bot():
-    """Bucle principal que actualiza el perfil periodicamente.
-    Se ejecuta como tarea de fondo junto con client.run()."""
+# ─── Bucle Principal del Bot (tarea de fondo) ─────────────────────
+async def update_loop():
+    """Bucle que actualiza el perfil periodicamente.
+    Se ejecuta como tarea de fondo dentro del mismo event loop
+    que maneja los updates de Pyrogram."""
     if not userbot:
-        log_startup("No se puede iniciar bot: Pyrogram no disponible")
+        log_startup("No se puede iniciar update_loop: Pyrogram no disponible")
         return
 
-    # Esperar a que el cliente se conecte
-    for _ in range(30):
-        if userbot.is_connected:
-            break
-        await asyncio.sleep(1)
-    
+    # El cliente ya debe estar conectado cuando se llama esta funcion
     if not userbot.is_connected:
-        log_startup("ERROR: Cliente no conectado despues de 30s")
+        log_startup("ERROR en update_loop: Cliente no conectado")
         return
 
     me = await userbot.get_me()
@@ -348,7 +374,7 @@ async def main_bot():
     bot_state["profile_name"] = me.first_name
     bot_state["start_time"] = time_mod.time()
     bot_state["started"] = True
-    log_startup(f"Bot conectado como: {me.first_name} (ID: {me.id})")
+    log_startup(f"Update loop iniciado - Conectado como: {me.first_name} (ID: {me.id})")
 
     await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
 
@@ -442,6 +468,7 @@ async def main_bot():
                     log_startup(f"FloodWait foto: {e.value}s")
                     await asyncio.sleep(5)
                 except Exception as e:
+                    bot_state["consecutive_photo_fails"] = bot_state.get("consecutive_photo_fails", 0) + 1
                     log_startup(f"Error subiendo foto: {e}")
 
                 # Eliminar foto anterior
@@ -509,6 +536,60 @@ async def main_bot():
             await asyncio.sleep(30)
 
 
+# ─── Main Async Function ──────────────────────────────────────────
+async def main():
+    """Funcion principal que inicia el bot usando async with."""
+    if not userbot:
+        log_startup("FATAL: Pyrogram no disponible. Saliendo.")
+        return
+
+    log_startup("Iniciando con patron async with + asyncio.run()")
+
+    try:
+        async with userbot:
+            bot_state["loop_running"] = True
+            me = await userbot.get_me()
+            bot_state["connected"] = True
+            bot_state["profile_name"] = me.first_name
+            bot_state["start_time"] = time_mod.time()
+            bot_state["started"] = True
+            log_startup(f"Bot conectado como: {me.first_name} (ID: {me.id})")
+
+            # Iniciar el bucle de actualizacion como tarea de fondo
+            # Usa asyncio.create_task() para que corra en el MISMO event loop
+            # que maneja los updates entrantes de Pyrogram
+            update_task = asyncio.create_task(update_loop())
+            log_startup("Update loop creado como tarea de fondo")
+
+            # Mantener el bot corriendo y procesando updates
+            # asyncio.Event().wait() bloquea indefinidamente, permitiendo
+            # que Pyrogram reciba y despache updates entrantes
+            stop_event = asyncio.Event()
+            try:
+                await stop_event.wait()
+            except (KeyboardInterrupt, SystemExit):
+                log_startup("Senal de terminacion recibida")
+            finally:
+                update_task.cancel()
+                try:
+                    await update_task
+                except asyncio.CancelledError:
+                    pass
+                bot_state["loop_running"] = False
+                log_startup("Bot detenido limpiamente")
+
+    except AuthKeyUnregistered:
+        log_startup("ERROR: Session invalida (AuthKeyUnregistered). Genera un nuevo SESSION_STRING.")
+        bot_state["error"] = "Session invalida - AuthKeyUnregistered"
+    except SessionRevoked:
+        log_startup("ERROR: Session revocada (SessionRevoked). Genera un nuevo SESSION_STRING.")
+        bot_state["error"] = "Session revocada - SessionRevoked"
+    except Exception as e:
+        log_startup(f"ERROR FATAL en main(): {e}")
+        logger.error(f"Error en main(): {e}\n{traceback.format_exc()}")
+        bot_state["error"] = str(e)
+
+
 # ─── Keep-Alive ────────────────────────────────────────────────────
 def keep_alive():
     render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
@@ -529,7 +610,7 @@ def keep_alive():
 
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
-    log_startup("=== DateTime Userbot v3.1 iniciando ===")
+    log_startup("=== DateTime Userbot v3.2 iniciando ===")
     
     # Flask en thread separado
     flask_thread = threading.Thread(
@@ -545,10 +626,17 @@ if __name__ == "__main__":
         log_startup("FATAL: Pyrogram no disponible. Saliendo.")
         sys.exit(1)
 
-    # PATRON ORIGINAL: asyncio.ensure_future() + client.run()
-    # Este patron es CRUCIAL para que Pyrogram reciba updates entrantes.
-    # client.run() maneja el event loop y el update dispatcher internamente.
-    # asyncio.ensure_future() agenda el bucle de actualizacion como tarea de fondo.
-    log_startup("Iniciando con patron ensure_future + run()")
-    asyncio.ensure_future(main_bot())
-    userbot.run()
+    # PATRON CORRECTO: asyncio.run() + async with userbot
+    # - asyncio.run() crea un event loop limpio
+    # - async with userbot garantiza que start() y stop() se llamen correctamente
+    # - asyncio.create_task() dentro del context manager asegura que todo
+    #   corra en el MISMO event loop (updates + bucle de perfil)
+    # - await stop_event.wait() mantiene el loop corriendo para procesar updates
+    log_startup("Llamando asyncio.run(main())...")
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log_startup("Bot detenido por KeyboardInterrupt")
+    except Exception as e:
+        log_startup(f"ERROR CRITICO: {e}")
+        logger.error(f"Error critico: {e}\n{traceback.format_exc()}")
