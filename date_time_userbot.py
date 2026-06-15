@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-DATE TIME USERBOT v3.3 - Maquina Potente
-FIX v3.3: Use client.run() pattern to match Dispatcher's event loop.
+DATE TIME USERBOT v3.4 - Maquina Potente
+FIX v3.4: Replace filters.command() with filters.regex() for all commands.
 
-ROOT CAUSE FOUND: Pyrogram's Dispatcher captures asyncio.get_event_loop()
-during Client.__init__(). When asyncio.run() is used, it creates a NEW
-event loop, but the Dispatcher still references the old one. Handler
-workers are created on the old (non-running) loop, so they never execute
-and incoming updates are never dispatched.
+ROOT CAUSE FOUND: Pyrogram's filters.command() does not work for userbot
+sessions. The filter internally checks for @bot_username in group commands,
+which is not applicable for userbots. This causes ALL command handlers to
+never match incoming messages.
 
-SOLUTION: Use client.run() which uses asyncio.get_event_loop() and
-loop.run_until_complete(), ensuring the SAME event loop that the
-Dispatcher captured is used throughout.
+EVIDENCE: Diagnostic handlers using filters.regex() successfully matched
+5 commands (.ping, .on, .save, etc.) while filters.command() handlers
+never fired despite the same messages being received.
 
-All handlers MUST be registered BEFORE client.run() so they attach
-to the correct loop via add_handler()'s self.loop.create_task().
+SOLUTION: Use filters.regex() with the cmd_filter() helper from commands.py
+which generates regex patterns equivalent to filters.command() but that
+actually work in userbot context.
 """
 
 import os
@@ -143,7 +143,7 @@ app = Flask(__name__)
 def health_check():
     return jsonify({
         "status": "alive",
-        "bot": "DateTimeUserbot v3.3",
+        "bot": "DateTimeUserbot v3.4",
         "connected": bot_state["connected"],
         "bot_active": bot_state["bot_active"],
         "last_update": bot_state["last_update"],
@@ -270,31 +270,12 @@ except Exception as e:
     log_startup(f"ERROR registrando dashboard: {e}")
 
 # ─── Registrar Handlers ANTES de client.run() ─────────────────────
-# CRITICAL: All handlers MUST be registered before client.run().
-# client.run() uses the same event loop as the Dispatcher, and
-# add_handler() creates tasks on that loop. If handlers are registered
-# after asyncio.run() creates a different loop, they won't work.
 if userbot:
-    # Diagnostic: raw update tracking
-    @userbot.on_raw_update()
-    async def raw_update_handler(client, update, users, chats):
-        bot_state["raw_update_count"] = bot_state.get("raw_update_count", 0) + 1
-
-    # Diagnostic: all messages tracking (group -100 = highest priority)
-    @userbot.on_message(group=-100)
-    async def diagnostic_all_msg(client, message):
-        bot_state["msg_received_count"] = bot_state.get("msg_received_count", 0) + 1
-        if bot_state["msg_received_count"] <= 10:
-            from_user = message.from_user
-            uid = from_user.id if from_user else "?"
-            txt = str(message.text)[:50] if message.text else "<media>"
-            log_startup(f"MSG #{bot_state['msg_received_count']}: uid={uid} txt={txt}")
-
-    # Register command handlers
+    # Register command handlers (v3.4: uses regex-based filters)
     try:
         from commands import register_commands
         register_commands(userbot, bot_state)
-        log_startup("Comandos registrados OK")
+        log_startup("Comandos v3.4 registrados OK (regex-based)")
     except Exception as e:
         log_startup(f"ERROR registrando comandos: {e}")
         logger.error(f"Error registrando comandos: {e}\n{traceback.format_exc()}")
@@ -567,7 +548,7 @@ def keep_alive():
 
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
-    log_startup("=== DateTime Userbot v3.3 iniciando ===")
+    log_startup("=== DateTime Userbot v3.4 iniciando ===")
     
     # Flask en thread separado
     flask_thread = threading.Thread(
@@ -583,17 +564,9 @@ if __name__ == "__main__":
         log_startup("FATAL: Pyrogram no disponible. Saliendo.")
         sys.exit(1)
 
-    # PATRON CORRECTO v3.3:
-    # 1. asyncio.ensure_future(main_bot()) - Agenda tarea en el loop por defecto
-    # 2. client.run() - Usa el MISMO loop por defecto (asyncio.get_event_loop())
-    #    Esto asegura que Dispatcher.handler_workers y main_bot() corran en
-    #    el mismo event loop, permitiendo que los updates se despachen correctamente.
-    #
-    # client.run() internamente hace:
-    #   loop = asyncio.get_event_loop()  # Mismo loop que Dispatcher capturo
-    #   loop.run_until_complete(self.start())  # Inicia cliente + dispatcher workers
-    #   loop.run_until_complete(idle())  # Mantiene el loop corriendo
-    #   loop.run_until_complete(self.stop())  # Detiene cliente
+    # Patron v3.4: ensure_future + client.run()
+    # client.run() usa el mismo event loop que el Dispatcher capturo,
+    # y los handlers se registran antes con filters.regex() (no filters.command()).
     log_startup("Iniciando con patron ensure_future + client.run()")
     asyncio.ensure_future(main_bot())
     userbot.run()

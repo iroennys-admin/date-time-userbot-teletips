@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Comandos de Telegram para el DateTime Userbot v3.2 - Maquina Potente"""
+"""Comandos de Telegram para el DateTime Userbot v3.4 - Maquina Potente
+
+FIX v3.4: filters.command() de Pyrogram v2 NO funciona en contexto de userbot.
+Los mensajes son recibidos pero nunca despachados a los handlers de filters.command().
+Sin embargo, filters.regex() SÍ funciona perfectamente.
+
+ROOT CAUSE: filters.command() internamente verifica si el comando va dirigido
+al bot (via @username), lo cual no aplica para userbots (no tienen @username
+de bot). Esto causa que el filtro siempre devuelva False para mensajes de userbot.
+
+SOLUTION: Reemplazar todos los filters.command() por filters.regex() usando
+el helper cmd_filter() que genera patrones regex equivalentes.
+"""
 
 from pyrogram import Client, filters
 import datetime
@@ -13,27 +25,28 @@ import urllib.request
 
 logger = logging.getLogger("DateTimeUserbot")
 
-CMD_PREFIXES = ".!/"
+# ─── Helper: Reemplazo de filters.command() con filters.regex() ───
+# filters.command() no funciona en userbots. filters.regex() sí funciona.
+# Este helper genera un filtro regex equivalente.
+# Ejemplo: cmd_filter("ping") genera filters.regex(r'^[\.\/!]ping\b') & filters.me
+
+def cmd_filter(cmd_name):
+    """Crea un filtro regex equivalente a filters.command() que funciona en userbots.
+    
+    Coincide con mensajes que empiezan con . ! / seguidos del nombre del comando.
+    El \\b asegura que no coincida con prefijos (ej: .ping no coincide con .pingu).
+    """
+    return filters.regex(rf'^[\.\/!]{cmd_name}\b', re.IGNORECASE) & filters.me
+
 
 def register_commands(app: Client, bot_state: dict):
     """Registra todos los comandos del bot."""
 
     # ═══════════════════════════════════════════════════════════════
-    # COMMAND TRACKING (grupo -10 = se ejecuta antes que los demas)
-    # ═══════════════════════════════════════════════════════════════
-
-    @app.on_message(filters.regex(r'^[\.\/!]\w+') & filters.me, group=-10)
-    async def track_commands(client, message):
-        """Cuenta cada comando recibido para diagnostico."""
-        bot_state["command_count"] = bot_state.get("command_count", 0) + 1
-        cmd = message.text.split()[0] if message.text else "?"
-        logger.info(f"[CMD] Comando recibido: {cmd} (total: {bot_state['command_count']})")
-
-    # ═══════════════════════════════════════════════════════════════
     # ENCENDIDO / APAGADO
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("on", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("on"))
     async def bot_on(client, message):
         """Activa el bot para que actualice el perfil."""
         try:
@@ -44,7 +57,7 @@ def register_commands(app: Client, bot_state: dict):
         except Exception as e:
             logger.error(f"Error en .on: {e}")
 
-    @app.on_message(filters.command("off", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("off"))
     async def bot_off(client, message):
         """Desactiva el bot, deja de actualizar el perfil."""
         try:
@@ -58,7 +71,7 @@ def register_commands(app: Client, bot_state: dict):
     # ESTILOS DE IMAGEN
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("style", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("style"))
     async def style_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -85,7 +98,7 @@ def register_commands(app: Client, bot_state: dict):
     # TEMAS DE FONDO
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("theme", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("theme"))
     async def theme_command(client, message):
         """Cambia el tema de fondo de la imagen."""
         try:
@@ -123,7 +136,7 @@ def register_commands(app: Client, bot_state: dict):
             try: await message.edit(f"❌ Error: {e}")
             except: pass
 
-    @app.on_message(filters.command("themes", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("themes"))
     async def themes_list_command(client, message):
         try:
             from image_generator import BACKGROUND_THEMES
@@ -139,7 +152,7 @@ def register_commands(app: Client, bot_state: dict):
     # FRASES / BIO
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("quote", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("quote"))
     async def quote_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -169,7 +182,7 @@ def register_commands(app: Client, bot_state: dict):
     # CLIMA / PROGRESO / COUNTDOWN
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("weather", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("weather"))
     async def weather_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -183,7 +196,7 @@ def register_commands(app: Client, bot_state: dict):
         except Exception as e:
             logger.error(f"Error en .weather: {e}")
 
-    @app.on_message(filters.command("progress", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("progress"))
     async def progress_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -197,7 +210,7 @@ def register_commands(app: Client, bot_state: dict):
         except Exception as e:
             logger.error(f"Error en .progress: {e}")
 
-    @app.on_message(filters.command("countdown", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("countdown"))
     async def countdown_command(client, message):
         try:
             args = message.text.split(maxsplit=2)
@@ -235,7 +248,7 @@ def register_commands(app: Client, bot_state: dict):
         "chill": {"emoji": "🧊", "name": "Relajado", "bio": "Chilling 🧊"},
     }
 
-    @app.on_message(filters.command("mood", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("mood"))
     async def mood_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -272,7 +285,7 @@ def register_commands(app: Client, bot_state: dict):
     # AFK
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("afk", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("afk"))
     async def afk_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -306,7 +319,7 @@ def register_commands(app: Client, bot_state: dict):
     # NOTAS (SAVE/RECALL)
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("note", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("note"))
     async def note_command(client, message):
         try:
             args = message.text.split(maxsplit=2)
@@ -370,7 +383,7 @@ def register_commands(app: Client, bot_state: dict):
     # BIO / NOMBRE PERSONALIZADO
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("bio", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("bio"))
     async def bio_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -389,7 +402,7 @@ def register_commands(app: Client, bot_state: dict):
         except Exception as e:
             logger.error(f"Error en .bio: {e}")
 
-    @app.on_message(filters.command("name", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("name"))
     async def name_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -412,7 +425,7 @@ def register_commands(app: Client, bot_state: dict):
     # INTERVALO DE ACTUALIZACION
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("interval", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("interval"))
     async def interval_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -435,7 +448,7 @@ def register_commands(app: Client, bot_state: dict):
     # PING / UPTIME
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("ping", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("ping"))
     async def ping_command(client, message):
         try:
             start = time_mod.time()
@@ -463,7 +476,7 @@ def register_commands(app: Client, bot_state: dict):
     # WHOIS (INFO DE USUARIO)
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("whois", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("whois"))
     async def whois_command(client, message):
         try:
             args = message.text.split(maxsplit=1)
@@ -518,7 +531,7 @@ def register_commands(app: Client, bot_state: dict):
     # ID (OBTENER IDS)
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("id", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("id"))
     async def id_command(client, message):
         try:
             if message.reply_to_message:
@@ -545,7 +558,7 @@ def register_commands(app: Client, bot_state: dict):
     # PURGE - Borrar mensajes en masa
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("purge", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("purge"))
     async def purge_command(client, message):
         if not message.reply_to_message:
             await message.edit("❌ Responde a un mensaje para indicar desde donde borrar.\nUso: Responde + `.purge`")
@@ -581,7 +594,7 @@ def register_commands(app: Client, bot_state: dict):
     # DEL - Borrar mensaje respondido
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("del", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("del"))
     async def del_command(client, message):
         if not message.reply_to_message:
             await message.edit("❌ Responde a un mensaje para borrarlo.\nUso: Responde + `.del`")
@@ -597,7 +610,7 @@ def register_commands(app: Client, bot_state: dict):
     # DELME - Borrar mis ultimos N mensajes
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("delme", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("delme"))
     async def delme_command(client, message):
         args = message.text.split(maxsplit=1)
         count = 5
@@ -636,7 +649,7 @@ def register_commands(app: Client, bot_state: dict):
     # CALC - Calculadora
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("calc", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("calc"))
     async def calc_command(client, message):
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
@@ -689,7 +702,7 @@ def register_commands(app: Client, bot_state: dict):
         else:
             return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
 
-    @app.on_message(filters.command("remind", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("remind"))
     async def remind_command(client, message):
         """Programa un recordatorio. .remind 30m Llamar a mama"""
         args = message.text.split(maxsplit=2)
@@ -756,7 +769,7 @@ def register_commands(app: Client, bot_state: dict):
     # EXEC / EVAL - Ejecutar codigo Python
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("exec", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("exec"))
     async def exec_command(client, message):
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
@@ -787,7 +800,7 @@ def register_commands(app: Client, bot_state: dict):
         except Exception as e:
             await message.edit(f"❌ **Error:**\n```\n{type(e).__name__}: {e}\n```")
 
-    @app.on_message(filters.command("eval", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("eval"))
     async def eval_command(client, message):
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
@@ -882,7 +895,7 @@ def register_commands(app: Client, bot_state: dict):
     # TRADUCIR - Traductor
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("tr", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("tr"))
     async def translate_command(client, message):
         args = message.text.split(maxsplit=2)
         
@@ -930,7 +943,7 @@ def register_commands(app: Client, bot_state: dict):
     # QR - Generador de codigos QR
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("qr", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("qr"))
     async def qr_command(client, message):
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
@@ -987,7 +1000,7 @@ def register_commands(app: Client, bot_state: dict):
     # CLONE - Clonar perfil de usuario
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("clone", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("clone"))
     async def clone_command(client, message):
         if not message.reply_to_message:
             await message.edit("❌ Responde al mensaje de un usuario para clonar su perfil.\nUso: Responde + `.clone`")
@@ -1036,7 +1049,7 @@ def register_commands(app: Client, bot_state: dict):
     # SPEEDTEST - Test de velocidad
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("speedtest", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("speedtest"))
     async def speedtest_command(client, message):
         await message.edit("📡 Ejecutando test de velocidad...")
         
@@ -1072,7 +1085,7 @@ def register_commands(app: Client, bot_state: dict):
     # URL - Acortar URLs
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("short", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("short"))
     async def short_url_command(client, message):
         args = message.text.split(maxsplit=1)
         if len(args) < 2:
@@ -1105,7 +1118,7 @@ def register_commands(app: Client, bot_state: dict):
     # KANG - Robar stickers
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("kang", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("kang"))
     async def kang_command(client, message):
         if not message.reply_to_message:
             await message.edit("❌ Responde a un sticker o imagen para robarlo.\nUso: Responde + `.kang` o `.kang emoji`")
@@ -1181,7 +1194,7 @@ def register_commands(app: Client, bot_state: dict):
     # SAVE - Guardar contenido restringido
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("save", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("save"))
     async def save_command(client, message):
         if not message.reply_to_message:
             await message.edit("❌ Responde a un mensaje con media para guardarlo.\nUso: Responde + `.save`")
@@ -1248,7 +1261,7 @@ def register_commands(app: Client, bot_state: dict):
     # PM PERMIT - Anti-spam en mensajes privados
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("pmpermit", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("pmpermit"))
     async def pmpermit_command(client, message):
         args = message.text.split(maxsplit=1)
         
@@ -1298,10 +1311,10 @@ def register_commands(app: Client, bot_state: dict):
                 await message.edit("❌ Usuario no encontrado")
 
     # ═══════════════════════════════════════════════════════════════
-    # INFO DEL SISTEMA - FIX: import sys added at top
+    # INFO DEL SISTEMA
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("sysinfo", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("sysinfo"))
     async def sysinfo_command(client, message):
         try:
             import platform
@@ -1333,7 +1346,7 @@ def register_commands(app: Client, bot_state: dict):
     # ESTADO COMPLETO
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("status", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("status"))
     async def status_command(client, message):
         try:
             state = bot_state
@@ -1346,7 +1359,7 @@ def register_commands(app: Client, bot_state: dict):
             active = "✅ ACTIVO" if state.get("bot_active", True) else "⏸️ PAUSADO"
             
             text = (
-                f"🤖 **DateTime Userbot v3.1**\n\n"
+                f"🤖 **DateTime Userbot v3.4**\n\n"
                 f"⚡ Estado: {active}\n"
                 f"🔌 Conectado: {'✅' if state.get('connected') else '❌'}\n"
                 f"⏱️ Uptime: {uptime_str}\n"
@@ -1369,14 +1382,14 @@ def register_commands(app: Client, bot_state: dict):
             logger.error(f"Error en .status: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # AYUDA COMPLETA v3.1
+    # AYUDA COMPLETA v3.4
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("help", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("help"))
     async def help_command(client, message):
         try:
             text = (
-                "🤖 **DateTime Userbot v3.1 - Comandos**\n\n"
+                "🤖 **DateTime Userbot v3.4 - Comandos**\n\n"
                 "**⚡ Control:**\n"
                 "`.on` - Activar bot\n"
                 "`.off` - Pausar bot\n"
@@ -1430,7 +1443,7 @@ def register_commands(app: Client, bot_state: dict):
     # REINICIAR
     # ═══════════════════════════════════════════════════════════════
 
-    @app.on_message(filters.command("restart", prefixes=CMD_PREFIXES) & filters.me)
+    @app.on_message(cmd_filter("restart"))
     async def restart_command(client, message):
         """Reinicia la conexion del bot."""
         try:
@@ -1441,7 +1454,7 @@ def register_commands(app: Client, bot_state: dict):
             logger.error(f"Error en .restart: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # HANDLER AFK - FIX: proper filter
+    # HANDLER AFK - Responder automaticamente en PM
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.private & ~filters.me)
@@ -1482,7 +1495,7 @@ def register_commands(app: Client, bot_state: dict):
             logger.error(f"Error en afk_handler: {e}")
 
     # ═══════════════════════════════════════════════════════════════
-    # LOG: Desactivar AFK al escribir - FIX: proper filter
+    # LOG: Desactivar AFK al escribir
     # ═══════════════════════════════════════════════════════════════
 
     @app.on_message(filters.private & filters.me)
@@ -1500,4 +1513,4 @@ def register_commands(app: Client, bot_state: dict):
         except Exception as e:
             logger.error(f"Error en auto_disable_afk: {e}")
 
-    logger.info(f"Comandos v3.1 registrados con prefijos: {CMD_PREFIXES}")
+    logger.info("Comandos v3.4 registrados (regex-based filters)")
