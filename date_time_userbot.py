@@ -249,14 +249,13 @@ try:
 except Exception as e:
     log_startup(f"ERROR registrando dashboard: {e}")
 
-# ─── Registrar Comandos ───────────────────────────────────────────
-if userbot:
-    try:
-        from commands import register_commands
-        register_commands(userbot, bot_state)
-        log_startup("Comandos registrados")
-    except Exception as e:
-        log_startup(f"ERROR registrando comandos: {e}")
+# ─── Registrar Comandos (se hara DESPUES de start() para asegurar dispatcher) ──
+commands_registered = False
+try:
+    from commands import register_commands
+    log_startup("Modulo de comandos importado")
+except Exception as e:
+    log_startup(f"ERROR importando modulo de comandos: {e}")
 
 # ─── Notificaciones ───────────────────────────────────────────────
 async def send_notification(message: str):
@@ -353,7 +352,19 @@ async def main_bot():
         bot_state["start_time"] = time_mod.time()
         last_success_time = time_mod.time()
         log_startup(f"Conectado como: {me.first_name} (ID: {me.id})")
-        log_startup(f"Handlers registrados: {len(userbot.dispatcher.groups)}")
+        
+        # CRITICAL: Registrar comandos DESPUES de start()
+        # Esto asegura que el dispatcher este correctamente inicializado
+        if not commands_registered:
+            try:
+                register_commands(userbot, bot_state)
+                commands_registered = True
+                # Verificar handlers
+                handler_count = sum(len(v) for v in getattr(userbot, 'dispatcher', type('',(),{'groups':{}})).groups.values()) if hasattr(userbot, 'dispatcher') else '?'
+                log_startup(f"Comandos registrados DESPUES de start() - Handlers: {handler_count}")
+            except Exception as e:
+                log_startup(f"ERROR registrando comandos despues de start(): {e}")
+        
         await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
     except (AuthKeyUnregistered, SessionRevoked) as e:
         log_startup(f"Sesion invalida: {e}")
@@ -384,6 +395,12 @@ async def main_bot():
                 consecutive_failures = 0
                 monitor_enabled = True
                 log_startup(f"Reiniciado como: {me.first_name}")
+                # Re-registrar handlers despues de reinicio
+                try:
+                    register_commands(userbot, bot_state)
+                    log_startup("Comandos re-registrados tras reinicio")
+                except Exception as e:
+                    log_startup(f"Error re-registrando comandos: {e}")
                 continue
 
             # Reconexion si esta desconectado (con backoff)
@@ -406,6 +423,12 @@ async def main_bot():
                     consecutive_failures = 0
                     monitor_enabled = True
                     log_startup(f"Reconectado como: {me.first_name}")
+                    # Re-registrar handlers despues de reconectar
+                    try:
+                        register_commands(userbot, bot_state)
+                        log_startup("Comandos re-registrados tras reconexion")
+                    except Exception as e:
+                        log_startup(f"Error re-registrando comandos: {e}")
                 except (AuthKeyUnregistered, SessionRevoked) as e:
                     log_startup(f"Sesion invalida al reconectar: {e}")
                     bot_state["error"] = str(e)
