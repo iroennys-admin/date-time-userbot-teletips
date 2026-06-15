@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 DATE TIME USERBOT v3.1 - Maquina Potente
-FIX: Pyrogram update handling, command registration, event loop.
+FIX: Use client.run() pattern for proper update reception.
+Based on original TeLeTiPs pattern: asyncio.ensure_future() + client.run()
 """
 
 import os
@@ -64,78 +65,15 @@ bot_state = {
     "approved_users": set(),
     "sed_count": 0,
     "command_count": 0,
+    "raw_update_count": 0,
+    "msg_received_count": 0,
+    "consecutive_photo_fails": 0,
 }
 
 def log_startup(msg):
     logger.info(msg)
     bot_state["startup_log"].append(f"{datetime.datetime.now().strftime('%H:%M:%S')} | {msg}")
     bot_state["startup_log"] = bot_state["startup_log"][-50:]
-
-# ─── Flask App (arranca PRIMERO) ─────────────────────────────────
-from flask import Flask, jsonify
-app = Flask(__name__)
-
-@app.route("/")
-def health_check():
-    return jsonify({
-        "status": "alive",
-        "bot": "DateTimeUserbot v3.1",
-        "connected": bot_state["connected"],
-        "bot_active": bot_state["bot_active"],
-        "last_update": bot_state["last_update"],
-        "update_count": bot_state["update_count"],
-        "style": bot_state["image_style"],
-        "theme": bot_state.get("bg_theme", "auto"),
-        "mood": bot_state.get("mood", "none"),
-        "command_count": bot_state.get("command_count", 0),
-    })
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "healthy", "bot_connected": bot_state["connected"], "bot_active": bot_state["bot_active"]})
-
-@app.route("/debug")
-def debug_info():
-    # Check handler registration
-    handler_info = {}
-    if userbot and hasattr(userbot, 'dispatcher'):
-        try:
-            groups = userbot.dispatcher.groups
-            handler_info = {
-                "groups_count": len(groups),
-                "total_handlers": sum(len(v) for v in groups.values()),
-                "group_keys": list(groups.keys()),
-            }
-        except Exception as e:
-            handler_info = {"error": str(e)}
-    
-    return jsonify({
-        "status": "alive",
-        "bot_started": bot_state["started"],
-        "bot_connected": bot_state["connected"],
-        "bot_active": bot_state["bot_active"],
-        "profile_name": bot_state["profile_name"],
-        "last_update": bot_state["last_update"],
-        "update_count": bot_state["update_count"],
-        "error": bot_state["error"],
-        "image_style": bot_state["image_style"],
-        "bg_theme": bot_state.get("bg_theme", ""),
-        "bio_category": bot_state["bio_category"],
-        "mood": bot_state.get("mood", ""),
-        "show_weather": bot_state["show_weather"],
-        "show_progress": bot_state["show_progress"],
-        "afk_enabled": bot_state["afk_enabled"],
-        "countdown": bot_state["countdown_date"],
-        "update_interval": bot_state.get("update_interval", 60),
-        "notes_count": len(bot_state.get("notes", {})),
-        "reminders_count": len(bot_state.get("reminders", [])),
-        "command_count": bot_state.get("command_count", 0),
-        "handler_info": handler_info,
-        "python_version": sys.version,
-        "startup_log": bot_state["startup_log"],
-    })
-
-log_startup("Flask app creada - v3.1")
 
 # ─── Cargar configuracion ────────────────────────────────────────
 try:
@@ -185,7 +123,58 @@ except Exception as e:
     DYNAMIC_HOUR_EMOJI = True
     MONITOR_TIMEOUT = 300
 
-# ─── Imports pesados (con manejo de errores) ─────────────────────
+# ─── Flask App ─────────────────────────────────────────────────────
+from flask import Flask, jsonify
+app = Flask(__name__)
+
+@app.route("/")
+def health_check():
+    return jsonify({
+        "status": "alive",
+        "bot": "DateTimeUserbot v3.1",
+        "connected": bot_state["connected"],
+        "bot_active": bot_state["bot_active"],
+        "last_update": bot_state["last_update"],
+        "update_count": bot_state["update_count"],
+        "command_count": bot_state.get("command_count", 0),
+    })
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "healthy", "bot_connected": bot_state["connected"], "bot_active": bot_state["bot_active"]})
+
+@app.route("/debug")
+def debug_info():
+    return jsonify({
+        "status": "alive",
+        "bot_started": bot_state["started"],
+        "bot_connected": bot_state["connected"],
+        "bot_active": bot_state["bot_active"],
+        "profile_name": bot_state["profile_name"],
+        "last_update": bot_state["last_update"],
+        "update_count": bot_state["update_count"],
+        "error": bot_state["error"],
+        "image_style": bot_state["image_style"],
+        "bg_theme": bot_state.get("bg_theme", ""),
+        "bio_category": bot_state["bio_category"],
+        "mood": bot_state.get("mood", ""),
+        "show_weather": bot_state["show_weather"],
+        "show_progress": bot_state["show_progress"],
+        "afk_enabled": bot_state["afk_enabled"],
+        "countdown": bot_state["countdown_date"],
+        "update_interval": bot_state.get("update_interval", 60),
+        "notes_count": len(bot_state.get("notes", {})),
+        "reminders_count": len(bot_state.get("reminders", [])),
+        "command_count": bot_state.get("command_count", 0),
+        "raw_update_count": bot_state.get("raw_update_count", 0),
+        "msg_received_count": bot_state.get("msg_received_count", 0),
+        "python_version": sys.version,
+        "startup_log": bot_state["startup_log"],
+    })
+
+log_startup("Flask app creada - v3.1")
+
+# ─── Imports ───────────────────────────────────────────────────────
 pyrogram_ok = False
 try:
     from pyrogram import Client, filters
@@ -264,14 +253,17 @@ except Exception as e:
     log_startup(f"ERROR registrando dashboard: {e}")
 
 # ─── Registrar Comandos ───────────────────────────────────────────
-try:
-    from commands import register_commands
-    log_startup("Modulo de comandos importado")
-except Exception as e:
-    register_commands = None
-    log_startup(f"ERROR importando modulo de comandos: {e}")
+# CRITICAL: Register BEFORE client.run() so Pyrogram's update 
+# dispatcher can find the handlers when it starts processing updates.
+if userbot:
+    try:
+        from commands import register_commands
+        register_commands(userbot, bot_state)
+        log_startup("Comandos registrados (antes de run)")
+    except Exception as e:
+        log_startup(f"ERROR registrando comandos: {e}")
 
-# ─── Notificaciones ───────────────────────────────────────────────
+# ─── Helper functions ──────────────────────────────────────────────
 async def send_notification(message: str):
     if not NOTIFY_CHAT_ID or not userbot:
         return
@@ -280,28 +272,21 @@ async def send_notification(message: str):
     except Exception as e:
         logger.debug(f"No se pudo enviar notificacion: {e}")
 
-# ─── Procesar recordatorios ───────────────────────────────────────
 async def process_reminders():
-    """Verifica y envia recordatorios pendientes."""
     if not userbot or not bot_state["connected"]:
         return
-    
     now = time_mod.time()
     remaining = []
     for rem in bot_state.get("reminders", []):
         if now >= rem["trigger_time"]:
             try:
-                await userbot.send_message(
-                    rem["chat_id"],
-                    f"⏰ **Recordatorio!**\n\n{rem['text']}"
-                )
+                await userbot.send_message(rem["chat_id"], f"⏰ **Recordatorio!**\n\n{rem['text']}")
             except Exception as e:
                 logger.debug(f"Error enviando recordatorio: {e}")
         else:
             remaining.append(rem)
     bot_state["reminders"] = remaining
 
-# ─── Calcular Countdown ───────────────────────────────────────────
 def get_countdown_days() -> tuple:
     cd_date = bot_state.get("countdown_date", "")
     if not cd_date:
@@ -314,7 +299,6 @@ def get_countdown_days() -> tuple:
     except Exception:
         return None, None
 
-# ─── Zonas horarias adicionales ───────────────────────────────────
 def get_extra_tz_times() -> list:
     extra_tz = EXTRA_TIMEZONES
     if not extra_tz:
@@ -333,7 +317,6 @@ def get_extra_tz_times() -> list:
             pass
     return results
 
-# ─── Calcular uptime ──────────────────────────────────────────────
 def get_uptime_str() -> str:
     uptime_s = int(time_mod.time() - bot_state.get("start_time", time_mod.time()))
     hours = uptime_s // 3600
@@ -344,141 +327,33 @@ def get_uptime_str() -> str:
 
 # ─── Bucle Principal del Bot ──────────────────────────────────────
 async def main_bot():
+    """Bucle principal que actualiza el perfil periodicamente.
+    Se ejecuta como tarea de fondo junto con client.run()."""
     if not userbot:
         log_startup("No se puede iniciar bot: Pyrogram no disponible")
         return
 
-    retry_count = 0
-    base_delay = 5
-    last_success_time = 0
-    monitor_enabled = False
-    consecutive_failures = 0
-
-    bot_state["started"] = True
-    log_startup("Iniciando bucle principal v3.1...")
-
-    # Conectar
-    try:
-        await userbot.start()
-        me = await userbot.get_me()
-        bot_state["connected"] = True
-        bot_state["profile_name"] = me.first_name
-        bot_state["start_time"] = time_mod.time()
-        last_success_time = time_mod.time()
-        log_startup(f"Conectado como: {me.first_name} (ID: {me.id})")
-        
-        # CRITICAL: Registrar comandos DESPUES de start()
-        # Esto asegura que el dispatcher este correctamente inicializado
-        try:
-            if register_commands:
-                register_commands(userbot, bot_state)
-                log_startup("Comandos registrados DESPUES de start() - OK")
-        except Exception as e:
-            log_startup(f"ERROR registrando comandos despues de start(): {e}")
-        
-        # DIAGNOSTICO: Verificar recepcion de updates de Telegram
-        @userbot.on_raw_update()
-        async def raw_update_diagnostic(client, update, users, chats):
-            bot_state["raw_update_count"] = bot_state.get("raw_update_count", 0) + 1
-            if bot_state["raw_update_count"] <= 5:
-                update_type = type(update).__name__
-                log_startup(f"Raw update #{bot_state['raw_update_count']}: {update_type}")
-        
-        # DIAGNOSTICO: Handler general para mensajes propios
-        @userbot.on_message(filters.me & filters.text)
-        async def message_diagnostic(client, message):
-            bot_state["msg_received_count"] = bot_state.get("msg_received_count", 0) + 1
-            bot_state["command_count"] = bot_state.get("command_count", 0) + 1
-            text_preview = (message.text or "")[:50]
-            log_startup(f"Msg propio #{bot_state['msg_received_count']}: {text_preview}")
-        
-        log_startup("Diagnosticos de updates registrados")
-        
-        await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
-    except (AuthKeyUnregistered, SessionRevoked) as e:
-        log_startup(f"Sesion invalida: {e}")
-        bot_state["error"] = str(e)
+    # Esperar a que el cliente se conecte
+    for _ in range(30):
+        if userbot.is_connected:
+            break
+        await asyncio.sleep(1)
+    
+    if not userbot.is_connected:
+        log_startup("ERROR: Cliente no conectado despues de 30s")
         return
-    except Exception as e:
-        log_startup(f"Error al iniciar: {e}")
-        bot_state["error"] = str(e)
 
-    log_startup("Entrando al bucle principal de actualizaciones...")
+    me = await userbot.get_me()
+    bot_state["connected"] = True
+    bot_state["profile_name"] = me.first_name
+    bot_state["start_time"] = time_mod.time()
+    bot_state["started"] = True
+    log_startup(f"Bot conectado como: {me.first_name} (ID: {me.id})")
+
+    await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
+
     while True:
         try:
-            # Verificar reinicio solicitado
-            if bot_state.get("restart_requested", False):
-                log_startup("Reinicio solicitado via comando...")
-                bot_state["restart_requested"] = False
-                try:
-                    await userbot.stop()
-                except:
-                    pass
-                bot_state["connected"] = False
-                await asyncio.sleep(3)
-                await userbot.start()
-                me = await userbot.get_me()
-                bot_state["connected"] = True
-                bot_state["profile_name"] = me.first_name
-                last_success_time = time_mod.time()
-                consecutive_failures = 0
-                monitor_enabled = True
-                log_startup(f"Reiniciado como: {me.first_name}")
-                # Re-registrar handlers despues de reinicio
-                try:
-                    register_commands(userbot, bot_state)
-                    log_startup("Comandos re-registrados tras reinicio")
-                except Exception as e:
-                    log_startup(f"Error re-registrando comandos: {e}")
-                continue
-
-            # Reconexion si esta desconectado (con backoff)
-            if not bot_state["connected"]:
-                retry_count += 1
-                delay = min(base_delay * (2 ** min(retry_count, 6)), 300)
-                log_startup(f"Intentando reconectar (intento {retry_count}, esperando {delay}s)...")
-                try:
-                    await userbot.stop()
-                except:
-                    pass
-                await asyncio.sleep(delay)
-                try:
-                    await userbot.start()
-                    me = await userbot.get_me()
-                    bot_state["connected"] = True
-                    bot_state["profile_name"] = me.first_name
-                    last_success_time = time_mod.time()
-                    retry_count = 0
-                    consecutive_failures = 0
-                    monitor_enabled = True
-                    log_startup(f"Reconectado como: {me.first_name}")
-                    # Re-registrar handlers despues de reconectar
-                    try:
-                        register_commands(userbot, bot_state)
-                        log_startup("Comandos re-registrados tras reconexion")
-                    except Exception as e:
-                        log_startup(f"Error re-registrando comandos: {e}")
-                except (AuthKeyUnregistered, SessionRevoked) as e:
-                    log_startup(f"Sesion invalida al reconectar: {e}")
-                    bot_state["error"] = str(e)
-                    bot_state["connected"] = False
-                    await asyncio.sleep(60)
-                    continue
-                except Exception as e:
-                    log_startup(f"Error reconectando: {e}")
-                    bot_state["connected"] = False
-                    continue
-
-            # Monitoreo proactivo
-            if monitor_enabled and last_success_time > 0:
-                current_time = time_mod.time()
-                time_since_last = current_time - last_success_time
-                if time_since_last > MONITOR_TIMEOUT:
-                    log_startup(f"No se actualizo en {int(time_since_last)}s. Forzando reconexion...")
-                    bot_state["connected"] = False
-                    monitor_enabled = False
-                    continue
-
             # Procesar recordatorios
             await process_reminders()
 
@@ -526,41 +401,32 @@ async def main_bot():
             image_path = None
             if image_gen_ok:
                 image_path = generate_profile_image(
-                    time_str=time_str,
-                    date_str=date_str,
-                    hour=hour,
+                    time_str=time_str, date_str=date_str, hour=hour,
                     style=bot_state.get("image_style", "auto"),
                     bg_theme=bot_state.get("bg_theme", ""),
-                    base_image=BASE_IMAGE,
-                    font_path=FONT_PATH,
+                    base_image=BASE_IMAGE, font_path=FONT_PATH,
                     weather=weather_data,
                     show_progress=bot_state.get("show_progress", True),
-                    countdown_days=countdown_days,
-                    countdown_label=countdown_label,
+                    countdown_days=countdown_days, countdown_label=countdown_label,
                     extra_tz_times=extra_tz,
                     mood_emoji=bot_state.get("mood_emoji", ""),
                     uptime_str=uptime_str,
                 )
 
-            # Solo subir foto cada 10 ciclos (10 min) o si nunca se ha subido
+            # Subir foto cada 10 min (no cada ciclo para evitar FloodWait)
             current_time = time_mod.time()
             should_upload_photo = (
                 bot_state.get("last_photo_time", 0) == 0 or
                 (current_time - bot_state.get("last_photo_time", 0)) >= 600
             )
 
-            # No subir si estamos en FloodWait o si las ultimas 3 subidas fallaron
-            consecutive_photo_fails = bot_state.get("consecutive_photo_fails", 0)
-            if consecutive_photo_fails >= 3:
+            # No subir si hay muchos fallos consecutivos
+            if bot_state.get("consecutive_photo_fails", 0) >= 3:
                 should_upload_photo = False
-                if bot_state.get("photo_update_counter", 0) % 20 == 0:
-                    log_startup("Foto: saltando (3+ fallos consecutivos)")
-            
+
+            # No subir si estamos en FloodWait
             if current_time < bot_state.get("photo_flood_wait_until", 0):
-                remaining = int(bot_state["photo_flood_wait_until"] - current_time)
                 should_upload_photo = False
-                if bot_state.get("photo_update_counter", 0) % 10 == 0:
-                    log_startup(f"FloodWait activo ({remaining}s restantes)")
             
             if image_path and should_upload_photo:
                 try:
@@ -570,25 +436,23 @@ async def main_bot():
                     log_startup("Foto subida OK")
                 except asyncio.TimeoutError:
                     bot_state["consecutive_photo_fails"] = bot_state.get("consecutive_photo_fails", 0) + 1
-                    log_startup(f"TIMEOUT subiendo foto (60s) - intento #{bot_state['consecutive_photo_fails']}")
+                    log_startup(f"TIMEOUT subiendo foto (60s)")
                 except FloodWait as e:
-                    flood_until = time_mod.time() + e.value
-                    bot_state["photo_flood_wait_until"] = flood_until
+                    bot_state["photo_flood_wait_until"] = time_mod.time() + e.value
                     log_startup(f"FloodWait foto: {e.value}s")
                     await asyncio.sleep(5)
                 except Exception as e:
                     log_startup(f"Error subiendo foto: {e}")
 
                 # Eliminar foto anterior
-                if bot_state.get("last_photo_time", 0) > 0:
-                    try:
-                        photos = userbot.get_chat_photos("me")
-                        async for i, photo in enumerate(photos):
-                            if i >= 1:
-                                await asyncio.wait_for(userbot.delete_profile_photos(photo.file_id), timeout=15)
-                                break
-                    except Exception:
-                        pass
+                try:
+                    photos = userbot.get_chat_photos("me")
+                    async for i, photo in enumerate(photos):
+                        if i >= 1:
+                            await asyncio.wait_for(userbot.delete_profile_photos(photo.file_id), timeout=15)
+                            break
+                except Exception:
+                    pass
 
                 try:
                     Path(image_path).unlink(missing_ok=True)
@@ -605,10 +469,7 @@ async def main_bot():
 
             # ── Actualizar apellido ──
             custom_ln = bot_state.get("custom_last_name", "")
-            if custom_ln:
-                last_name = custom_ln
-            else:
-                last_name = f"| {time_str} | {date_str}"
+            last_name = custom_ln if custom_ln else f"| {time_str} | {date_str}"
             
             # ── Actualizar bio ──
             custom_bio = bot_state.get("custom_bio", "")
@@ -623,7 +484,6 @@ async def main_bot():
                     if BIO_CUSTOM_PREFIX:
                         bio_parts.append(BIO_CUSTOM_PREFIX)
                     bio_parts.append(f"{emoji} {quote}")
-                
                 if BIO_SHOW_COUNTER:
                     bio_parts.append(f"Dia {day_of_year}")
                 bio = " | ".join(bio_parts)
@@ -632,58 +492,21 @@ async def main_bot():
                 await userbot.update_profile(last_name=last_name, bio=bio)
                 bot_state["last_update"] = now.isoformat()
                 bot_state["update_count"] += 1
-                last_success_time = time_mod.time()
-                consecutive_failures = 0
-                monitor_enabled = True
                 if bot_state["update_count"] % 10 == 0:
                     log_startup(f"Perfil actualizado #{bot_state['update_count']}: {day_name} {time_str}")
             except FloodWait as e:
                 logger.warning(f"FloodWait en perfil: {e.value}s")
                 await asyncio.sleep(min(e.value, 60))
-                continue
 
-            retry_count = 0
             interval = bot_state.get("update_interval", UPDATE_INTERVAL)
             await asyncio.sleep(interval)
 
         except FloodWait as e:
-            logger.warning(f"FloodWait global: {e.value}s")
             await asyncio.sleep(min(e.value, 120))
-
-        except (AuthKeyUnregistered, SessionRevoked) as e:
-            logger.critical(f"Sesion invalida: {e}")
-            bot_state["connected"] = False
-            bot_state["error"] = str(e)
-            break
-
-        except ConnectionError as e:
-            retry_count += 1
-            consecutive_failures += 1
-            delay = min(base_delay * (2 ** min(retry_count, 6)), 300)
-            logger.error(f"Error de conexion (intento {retry_count}): {e}")
-            bot_state["connected"] = False
-            await asyncio.sleep(delay)
-
         except Exception as e:
-            retry_count += 1
-            consecutive_failures += 1
-            delay = min(base_delay * (2 ** min(retry_count, 6)), 300)
-            log_startup(f"ERROR en bucle (intento {retry_count}): {e}")
-            logger.error(f"Error inesperado (intento {retry_count}): {e}")
-            logger.debug(traceback.format_exc())
-
-            if consecutive_failures >= MAX_RETRIES * 3:
-                logger.critical("Demasiados fallos consecutivos. Reiniciando cliente...")
-                try:
-                    await userbot.stop()
-                except:
-                    pass
-                retry_count = 0
-                consecutive_failures = 0
-                bot_state["connected"] = False
-                monitor_enabled = False
-
-            await asyncio.sleep(delay)
+            log_startup(f"ERROR en bucle: {e}")
+            logger.error(f"Error: {e}")
+            await asyncio.sleep(30)
 
 
 # ─── Keep-Alive ────────────────────────────────────────────────────
@@ -691,7 +514,6 @@ def keep_alive():
     render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
     if not render_url:
         render_url = os.environ.get("RENDER_SERVICE_URL", "")
-    
     if render_url:
         def ping():
             while True:
@@ -700,43 +522,33 @@ def keep_alive():
                 except Exception:
                     pass
                 threading.Event().wait(14 * 60)
-        
         t = threading.Thread(target=ping, daemon=True)
         t.start()
         logger.info(f"Keep-alive activado: {render_url}/health")
-    else:
-        logger.warning("Keep-alive: RENDER_EXTERNAL_URL no encontrada")
 
 
 # ─── Punto de Entrada ─────────────────────────────────────────────
 if __name__ == "__main__":
     log_startup("=== DateTime Userbot v3.1 iniciando ===")
     
-    async def run_all():
-        # Iniciar Flask en thread separado
-        flask_thread = threading.Thread(
-            target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False),
-            daemon=True
-        )
-        flask_thread.start()
-        log_startup(f"Flask iniciando en puerto {PORT}")
-        
-        keep_alive()
-        
-        # Ejecutar el bot
-        await main_bot()
+    # Flask en thread separado
+    flask_thread = threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False),
+        daemon=True
+    )
+    flask_thread.start()
+    log_startup(f"Flask iniciando en puerto {PORT}")
+    
+    keep_alive()
 
-    # CRITICAL FIX: Use explicit event loop creation (same as original)
-    # asyncio.run() creates a NEW loop that doesn't match Pyrogram's expectations
-    # for receiving incoming updates. The original approach works because
-    # Pyrogram stores the event loop at Client creation time and uses it
-    # for its internal update dispatcher.
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(run_all())
-    except KeyboardInterrupt:
-        logger.info("Bot detenido por usuario")
-    except Exception as e:
-        logger.critical(f"Error fatal: {e}")
-        logger.debug(traceback.format_exc())
+    if not userbot:
+        log_startup("FATAL: Pyrogram no disponible. Saliendo.")
+        sys.exit(1)
+
+    # PATRON ORIGINAL: asyncio.ensure_future() + client.run()
+    # Este patron es CRUCIAL para que Pyrogram reciba updates entrantes.
+    # client.run() maneja el event loop y el update dispatcher internamente.
+    # asyncio.ensure_future() agenda el bucle de actualizacion como tarea de fondo.
+    log_startup("Iniciando con patron ensure_future + run()")
+    asyncio.ensure_future(main_bot())
+    userbot.run()
