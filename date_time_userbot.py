@@ -376,6 +376,24 @@ async def main_bot():
         except Exception as e:
             log_startup(f"ERROR registrando comandos despues de start(): {e}")
         
+        # DIAGNOSTICO: Verificar recepcion de updates de Telegram
+        @userbot.on_raw_update()
+        async def raw_update_diagnostic(client, update, users, chats):
+            bot_state["raw_update_count"] = bot_state.get("raw_update_count", 0) + 1
+            if bot_state["raw_update_count"] <= 5:
+                update_type = type(update).__name__
+                log_startup(f"Raw update #{bot_state['raw_update_count']}: {update_type}")
+        
+        # DIAGNOSTICO: Handler general para mensajes propios
+        @userbot.on_message(filters.me & filters.text)
+        async def message_diagnostic(client, message):
+            bot_state["msg_received_count"] = bot_state.get("msg_received_count", 0) + 1
+            bot_state["command_count"] = bot_state.get("command_count", 0) + 1
+            text_preview = (message.text or "")[:50]
+            log_startup(f"Msg propio #{bot_state['msg_received_count']}: {text_preview}")
+        
+        log_startup("Diagnosticos de updates registrados")
+        
         await send_notification(f"Bot iniciado! Conectado como {me.first_name}")
     except (AuthKeyUnregistered, SessionRevoked) as e:
         log_startup(f"Sesion invalida: {e}")
